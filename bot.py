@@ -7,7 +7,7 @@ from aiogram.filters import Command
 # ВАШ ТОКЕН (Обязательно смените его в @BotFather!)
 API_TOKEN = '8719240397:AAFgT2cH5QfJy-d1PM4_5dYGMH5RqoCoAO8'
 # ССЫЛКА НА ВАШ САЙТ (Где лежит index.html)
-WEBAPP_URL = 'https://ваш-сайт.com' 
+WEBAPP_URL = 'https://kiberkiller2000.github.io/my-use/' 
 
 logging.basicConfig(level=logging.INFO)
 
