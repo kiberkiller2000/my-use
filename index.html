@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>RAMP — Авторизация</title>
+    <script src="https://telegram.org"></script>
+    <style>
+        :root {
+            --bg-color: #0b0e14;
+            --card-bg: #121620;
+            --border-color: #1c2230;
+            --text-main: #ffffff;
+            --text-secondary: #636e81;
+            --accent-green: #004d3d;
+            --accent-green-text: #10b981;
+            --blue-gradient: linear-gradient(90deg, #00d2ff 0%, #3a7bd5 100%);
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            font-family: 'Inter', -apple-system, sans-serif;
+            margin: 0;
+            padding: 15px;
+            display: flex;
+            justify-content: center;
+        }
+
+        .container {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 24px;
+            width: 100%;
+            max-width: 400px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+        }
+
+        .header { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+        .logo { background: #00f2ff; color: black; font-weight: bold; width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; }
+        .title { font-size: 18px; font-weight: 700; }
+        .subtitle { color: var(--text-secondary); font-size: 12px; margin-bottom: 20px; }
+
+        .tabs { display: flex; background: #0b0e14; border-radius: 8px; padding: 4px; margin-bottom: 20px; }
+        .tab { flex: 1; text-align: center; padding: 10px; font-size: 13px; border-radius: 6px; cursor: pointer; transition: 0.3s; }
+        .tab.active { background: var(--accent-green); color: var(--accent-green-text); border: 1px solid #065f46; }
+        .tab.disabled { color: var(--text-secondary); cursor: not-allowed; }
+
+        .label { font-size: 11px; text-transform: uppercase; color: var(--text-main); font-weight: 700; margin-bottom: 8px; letter-spacing: 0.5px; }
+        
+        .input-wrapper { background: #0b0e14; border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; margin-bottom: 15px; }
+        input { background: transparent; border: none; color: white; width: 100%; outline: none; font-family: monospace; font-size: 14px; }
+        
+        .info-text { font-size: 12px; color: var(--text-secondary); line-height: 1.5; margin-bottom: 25px; }
+
+        .btn-submit {
+            background: var(--blue-gradient);
+            color: #000;
+            border: none;
+            width: 100%;
+            padding: 14px;
+            border-radius: 10px;
+            font-weight: 700;
+            font-size: 15px;
+            cursor: pointer;
+        }
+
+        #user-ip { color: #3a7bd5; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">R</div>
+            <div class="title">RAMP — Авторизация</div>
+        </div>
+        <div class="subtitle">Привязка и проверка лицензии</div>
+
+        <div class="tabs">
+            <div class="tab active">Привязать / подтвердить</div>
+            <div class="tab disabled">Только проверка</div>
+        </div>
+
+        <div class="label">ЛИЦЕНЗИОННЫЙ КЛЮЧ</div>
+        <div class="input-wrapper">
+            <input type="text" id="license-key" placeholder="XXXX-XXXX-XXXX-XXXX">
+        </div>
+
+        <div class="info-text">
+            Введите свой ключ, чтобы привязать этот IP-адрес: <span id="user-ip">определяем...</span>. 
+            Если ключ уже привязан к этому же адресу, привязка подтверждена.
+        </div>
+
+        <button class="btn-submit" onclick="sendToBot()">Проверить</button>
+    </div>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.expand();
+
+        // Определение IP
+        fetch('https://ipify.org')
+            .then(res => res.json())
+            .then(data => document.getElementById('user-ip').innerText = data.ip)
+            .catch(() => document.getElementById('user-ip').innerText = "не определен");
+
+        function sendToBot() {
+            const key = document.getElementById('license-key').value;
+            const ip = document.getElementById('user-ip').innerText;
+            if (key.length < 5) {
+                alert("Введите корректный ключ");
+                return;
+            }
+            // Отправляем данные в бота
+            tg.sendData(`activated:${key}|ip:${ip}`);
+            tg.close();
+        }
+    </script>
+</body>
+</html>
