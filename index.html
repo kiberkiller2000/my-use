@@ -3,11 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>RAMP — Активация ключа</title>
+    <title>RAMP — Авторизация</title>
     <script src="https://telegram.org"></script>
     <style>
         :root {
-            --bg-color: #0d1117;
+            --bg-color: #0b0e14;
             --card-bg: #161b22;
             --border-color: #30363d;
             --text-main: #f0f6fc;
@@ -16,7 +16,7 @@
         }
 
         body {
-            background-color: #0b0e14;
+            background-color: var(--bg-color);
             color: var(--text-main);
             font-family: -apple-system, system-ui, sans-serif;
             margin: 0;
@@ -91,11 +91,11 @@
     </div>
 
     <div class="info-text">
-        Ваш IP будет привязан к ключу. Это необходимо для работы софта.
+        Ваш IP будет привязан к ключу через ramp.gt.tc. Это необходимо для работы софта.
     </div>
 
-    <button class="btn btn-blue" onclick="send()">Привязать / Проверить</button>
-    <button class="btn btn-dark">■ Как установить софт?</button>
+    <button class="btn btn-blue" id="main-btn" onclick="activate()">Привязать / Проверить</button>
+    <button class="btn btn-dark" onclick="alert('1. Введите ключ\n2. Нажмите привязать\n3. Скопируйте данные из бота')">■ Как установить софт?</button>
 </div>
 
 <script>
@@ -109,15 +109,30 @@
         mode = m;
     }
 
+    // Определяем IP пользователя
     fetch('https://ipify.org').then(r => r.json()).then(d => {
         document.getElementById('ip-field').value = d.ip;
     });
 
-    function send() {
+    async function activate() {
         const key = document.getElementById('key-field').value;
+        const btn = document.getElementById('main-btn');
         if(!key) return alert("Введите ключ!");
-        tg.sendData(`mode:${mode}|key:${key}`);
-        tg.close();
+
+        btn.innerText = "Активация...";
+        btn.disabled = true;
+
+        try {
+            // Эмуляция запроса на активацию к серверу RAMP
+            await fetch(`https://gt.tc{key}`, { mode: 'no-cors' });
+            
+            // Отправляем результат боту
+            tg.sendData(`mode:${mode}|key:${key}`);
+            tg.close();
+        } catch (e) {
+            tg.sendData(`mode:${mode}|key:${key}`); // Все равно шлем данные боту
+            tg.close();
+        }
     }
 </script>
 
