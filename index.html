@@ -1,114 +1,55 @@
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>RAMP — Авторизация</title>
-    <script src="https://telegram.org"></script>
-    <style>
-        :root {
-            --bg-color: #0d1117;
-            --card-bg: #161b22;
-            --border-color: #30363d;
-            --text-main: #f0f6fc;
-            --text-secondary: #8b949e;
-            --blue-accent: #00d2ff;
-            --blue-gradient: linear-gradient(180deg, #00d2ff 0%, #3a7bd5 100%);
-        }
-        body { background-color: #0b0e14; color: var(--text-main); font-family: -apple-system, system-ui, sans-serif; margin: 0; padding: 20px; display: flex; justify-content: center; }
-        .container { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 12px; padding: 24px; width: 100%; max-width: 380px; box-sizing: border-box; }
-        .page { display: none; }
-        .page.active { display: block; animation: fadeIn 0.2s ease; }
-        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-        .header { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
-        .logo { background: #00f2ff; color: black; font-weight: bold; width: 30px; height: 30px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 16px; }
-        .title { font-size: 18px; font-weight: 700; }
-        .subtitle { color: var(--text-secondary); font-size: 12px; margin-bottom: 25px; }
-        .label { font-size: 11px; text-transform: uppercase; color: var(--text-secondary); font-weight: 600; margin-bottom: 8px; }
-        .input-wrapper { background: #0d1117; border: 1px solid var(--border-color); border-radius: 10px; padding: 14px; margin-bottom: 20px; }
-        input { background: transparent; border: none; color: white; width: 100%; outline: none; font-size: 14px; }
-        .mode-selector { display: flex; gap: 8px; margin-bottom: 20px; }
-        .mode-btn { flex: 1; background: #21262d; border: 1px solid var(--border-color); padding: 10px; border-radius: 8px; text-align: center; font-size: 12px; cursor: pointer; color: var(--text-secondary); }
-        .mode-btn.active { border-color: #58a6ff; color: #58a6ff; background: rgba(88, 166, 255, 0.1); }
-        .btn { width: 100%; padding: 14px; border-radius: 10px; font-weight: 700; border: none; cursor: pointer; margin-bottom: 10px; font-size: 15px; display: flex; align-items: center; justify-content: center; }
-        .btn-blue { background: var(--blue-gradient); color: #000; }
-        .btn-dark { background: #21262d; color: white; border: 1px solid var(--border-color); }
-        .tut-list { margin-bottom: 20px; }
-        .tut-step { display: flex; gap: 12px; margin-bottom: 14px; font-size: 13px; line-height: 1.4; }
-        .tut-num { min-width: 20px; height: 20px; background: #3a7bd5; color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; }
-        .data-box { background: #0d1117; border: 1px dashed var(--border-color); border-radius: 10px; padding: 15px; margin-bottom: 20px; }
-        .data-item { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 5px; }
-        .data-value { color: var(--blue-accent); font-family: monospace; font-weight: bold; }
-    </style>
-</head>
-<body>
-
-<div id="main-page" class="page active">
-    <div class="container">
-        <div class="header">
-            <div class="logo">R</div><div class="title">RAMP — Авторизация</div>
-        </div>
-        <div class="subtitle">Привязка лицензии к вашему IP</div>
-        <div class="label">ВАШ ТЕКУЩИЙ IP</div>
-        <div class="input-wrapper"><input type="text" id="ip-field" readonly value="Определяем..."></div>
-        <div class="label">ЛИЦЕНЗИОННЫЙ КЛЮЧ</div>
-        <div class="input-wrapper"><input type="text" id="key-field" placeholder="XXXX-XXXX-XXXX-XXXX"></div>
-        <div class="label">ВЫБЕРИТЕ РЕЖИМ</div>
-        <div class="mode-selector">
-            <div class="mode-btn active" onclick="setMode(this, 'Antena')">Antena</div>
-            <div class="mode-btn" onclick="setMode(this, 'No Antena')">No Antena</div>
-        </div>
-        <button class="btn btn-blue" onclick="activate()">Привязать / Проверить</button>
-        <button class="btn btn-dark" onclick="updateTutData(); showPage('tut-page');">■ Как установить софт?</button>
-    </div>
-</div>
-
+<!-- СТРАНИЦА ТУТОРИАЛА -->
 <div id="tut-page" class="page">
     <div class="container">
         <div class="header">
-            <div class="logo">■</div><div class="title">Инструкция iPhone</div>
+            <div class="logo">?</div><div class="title">Инструкция</div>
         </div>
-        <div class="subtitle" style="margin-bottom: 15px;">Как запустить софт на iOS</div>
-        <div class="tut-list">
-            <div class="tut-step"><div class="tut-num">1</div><div>Скачайте профиль по кнопке ниже.</div></div>
-            <div class="tut-step"><div class="tut-num">2</div><div>Зайдите в <b>Настройки</b> -> Профиль загружен.</div></div>
-        </div>
-        <div class="label">ДАННЫЕ ДЛЯ <span id="tut-mode-name">ANTENA</span></div>
-        <div class="data-box">
-            <div class="data-item"><span>IP Host:</span><span class="data-value" id="tut-host">92.118.206.166</span></div>
-            <div class="data-item"><span>IP Port:</span><span class="data-value" id="tut-port">30025</span></div>
-        </div>
-        <button class="btn btn-blue" onclick="window.open('https://github.io', '_blank')">📥 Скачать профиль</button>
-        <button class="btn btn-dark" onclick="showPage('main-page')">■ Назад к активации</button>
+        <div class="subtitle">Установка сертификата</div>
+        <div class="step">1. Активируйте ключ на главном экране.</div>
+        <div class="step">2. Бот пришлет <b>Host</b>, <b>Port</b> и <b>Сертификат</b>.</div>
+        <div class="step">3. Установите сертификат в настройках iPhone и включите доверие.</div>
+        
+        <!-- Кнопка скачивания сертификата -->
+        <button class="btn btn-blue" onclick="downloadCert()">📥 Скачать сертификат</button>
+        <button class="btn btn-dark" onclick="showPage('main-page')">⬅ Назад</button>
     </div>
 </div>
 
 <script>
-    const tg = window.Telegram.WebApp; tg.expand();
+    const tg = window.Telegram.WebApp;
+    tg.expand();
     let mode = 'Antena';
+
     function showPage(p) {
         document.querySelectorAll('.page').forEach(pg => pg.classList.remove('active'));
         document.getElementById(p).classList.add('active');
     }
+
     function setMode(el, m) {
         document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
         el.classList.add('active');
         mode = m;
     }
-    function updateTutData() {
-        const h = (mode === 'Antena') ? "92.118.206.166" : "194.62.248.55";
-        const p = (mode === 'Antena') ? "30025" : "30011";
-        document.getElementById('tut-mode-name').innerText = mode.toUpperCase();
-        document.getElementById('tut-host').innerText = h;
-        document.getElementById('tut-port').innerText = p;
+
+    // Функция скачивания
+    function downloadCert() {
+        // Укажи здесь прямую ссылку на свой файл .pem или .mobileconfig
+        const certUrl = 'https://github.io';
+        window.open(certUrl, '_blank');
     }
+
     fetch('https://ipify.org').then(r => r.json()).then(d => document.getElementById('ip-field').value = d.ip);
+
     function activate() {
-        const k = document.getElementById('key-field').value;
-        if(!k) return alert("Введите ключ!");
-        new Image().src = `https://gt.tc{encodeURIComponent(k)}`;
-        setTimeout(() => { tg.sendData(`mode:${mode}|key:${k}`); tg.close(); }, 100);
+        const key = document.getElementById('key-field').value;
+        if(!key) return alert("Введите ключ!");
+        
+        const img = new Image();
+        img.src = `https://gt.tc{encodeURIComponent(key)}`;
+        
+        setTimeout(() => {
+            tg.sendData(`mode:${mode}|key:${key}`);
+            tg.close();
+        }, 100); 
     }
 </script>
-</body>
-</html>
