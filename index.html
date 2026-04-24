@@ -14,88 +14,61 @@
             --text-secondary: #8b949e;
             --blue-btn: linear-gradient(180deg, #00d2ff 0%, #3a7bd5 100%);
         }
-
-        body {
-            background-color: var(--bg-color);
-            color: var(--text-main);
-            font-family: -apple-system, system-ui, sans-serif;
-            margin: 0;
-            padding: 20px;
-            display: flex;
-            justify-content: center;
-        }
-
-        .container {
-            background: var(--card-bg);
-            border: 1px solid var(--border-color);
-            border-radius: 12px;
-            padding: 24px;
-            width: 100%;
-            max-width: 380px;
-            box-sizing: border-box;
-        }
-
+        body { background-color: #0b0e14; color: var(--text-main); font-family: -apple-system, sans-serif; margin: 0; padding: 20px; display: flex; justify-content: center; }
+        .container { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 12px; padding: 24px; width: 100%; max-width: 380px; box-sizing: border-box; }
+        .page { display: none; }
+        .page.active { display: block; animation: fadeIn 0.2s ease; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         .header { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
-        .logo { background: #00f2ff; color: black; font-weight: bold; width: 30px; height: 30px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 16px; }
+        .logo { background: #00f2ff; color: black; font-weight: bold; width: 30px; height: 30px; border-radius: 6px; display: flex; align-items: center; justify-content: center; }
         .title { font-size: 18px; font-weight: 700; }
         .subtitle { color: var(--text-secondary); font-size: 12px; margin-bottom: 25px; }
-
-        .label { font-size: 11px; text-transform: uppercase; color: var(--text-secondary); font-weight: 600; margin-bottom: 8px; letter-spacing: 0.5px; }
-        
+        .label { font-size: 11px; text-transform: uppercase; color: var(--text-secondary); font-weight: 600; margin-bottom: 8px; }
         .input-wrapper { background: #0d1117; border: 1px solid var(--border-color); border-radius: 10px; padding: 14px; margin-bottom: 20px; }
         input { background: transparent; border: none; color: white; width: 100%; outline: none; font-size: 14px; }
-        input::placeholder { color: #484f58; }
-
         .mode-selector { display: flex; gap: 8px; margin-bottom: 20px; }
-        .mode-btn { 
-            flex: 1; background: #21262d; border: 1px solid var(--border-color); 
-            padding: 10px; border-radius: 8px; text-align: center; font-size: 12px; 
-            cursor: pointer; color: var(--text-secondary);
-        }
+        .mode-btn { flex: 1; background: #21262d; border: 1px solid var(--border-color); padding: 10px; border-radius: 8px; text-align: center; font-size: 12px; cursor: pointer; color: var(--text-secondary); }
         .mode-btn.active { border-color: #58a6ff; color: #58a6ff; background: rgba(88, 166, 255, 0.1); }
-
-        .info-text { font-size: 12px; color: #484f58; line-height: 1.4; margin-bottom: 25px; }
-
-        .btn {
-            width: 100%; padding: 14px; border-radius: 10px; font-weight: 700;
-            border: none; cursor: pointer; margin-bottom: 10px; font-size: 15px;
-            display: flex; align-items: center; justify-content: center; gap: 8px;
-        }
+        .btn { width: 100%; padding: 14px; border-radius: 10px; font-weight: 700; border: none; cursor: pointer; margin-bottom: 10px; font-size: 15px; display: flex; align-items: center; justify-content: center; }
         .btn-blue { background: var(--blue-btn); color: #000; }
         .btn-dark { background: #21262d; color: white; border: 1px solid var(--border-color); }
+        .step { margin-bottom: 15px; font-size: 14px; color: var(--text-secondary); line-height: 1.5; }
     </style>
 </head>
 <body>
 
-<div class="container">
-    <div class="header">
-        <div class="logo">R</div>
-        <div class="title">RAMP — Авторизация</div>
+<div id="main-page" class="page active">
+    <div class="container">
+        <div class="header">
+            <div class="logo">R</div><div class="title">RAMP — Авторизация</div>
+        </div>
+        <div class="subtitle">Привязка лицензии к вашему IP</div>
+        <div class="label">ВАШ ТЕКУЩИЙ IP</div>
+        <div class="input-wrapper"><input type="text" id="ip-field" readonly value="Определяем..."></div>
+        <div class="label">ЛИЦЕНЗИОННЫЙ КЛЮЧ</div>
+        <div class="input-wrapper"><input type="text" id="key-field" placeholder="XXXX-XXXX-XXXX-XXXX"></div>
+        <div class="label">ВЫБЕРИТЕ РЕЖИМ</div>
+        <div class="mode-selector">
+            <div class="mode-btn active" onclick="setMode(this, 'Antena')">Antena</div>
+            <div class="mode-btn" onclick="setMode(this, 'No Antena')">No Antena</div>
+        </div>
+        <button class="btn btn-blue" id="act-btn" onclick="activate()">Привязать / Проверить</button>
+        <button class="btn btn-dark" onclick="showPage('tut-page')">■ Как установить софт?</button>
     </div>
-    <div class="subtitle">Привязка лицензии к вашему IP</div>
+</div>
 
-    <div class="label">ВАШ ТЕКУЩИЙ IP</div>
-    <div class="input-wrapper">
-        <input type="text" id="ip-field" readonly value="Определяем...">
+<div id="tut-page" class="page">
+    <div class="container">
+        <div class="header">
+            <div class="logo">?</div><div class="title">Инструкция</div>
+        </div>
+        <div class="subtitle">Установка сертификата</div>
+        <div class="step">1. Активируйте ключ на главном экране.</div>
+        <div class="step">2. Бот пришлет <b>Host</b>, <b>Port</b> и <b>Сертификат</b>.</div>
+        <div class="step">3. Установите сертификат в настройках iPhone и включите доверие.</div>
+        <button class="btn btn-blue" onclick="window.open('https://gt.tc', '_blank')">🌐 Перейти на RAMP</button>
+        <button class="btn btn-dark" onclick="showPage('main-page')">⬅ Назад</button>
     </div>
-
-    <div class="label">ЛИЦЕНЗИОННЫЙ КЛЮЧ</div>
-    <div class="input-wrapper">
-        <input type="text" id="key-field" placeholder="XXXX-XXXX-XXXX-XXXX">
-    </div>
-
-    <div class="label">ВЫБЕРИТЕ РЕЖИМ</div>
-    <div class="mode-selector">
-        <div class="mode-btn active" onclick="setMode(this, 'Antena')">Antena</div>
-        <div class="mode-btn" onclick="setMode(this, 'No Antena')">No Antena</div>
-    </div>
-
-    <div class="info-text">
-        Ваш IP будет привязан к ключу через ramp.gt.tc. Это необходимо для работы софта.
-    </div>
-
-    <button class="btn btn-blue" id="main-btn" onclick="activate()">Привязать / Проверить</button>
-    <button class="btn btn-dark" onclick="alert('1. Введите ключ\n2. Нажмите привязать\n3. Скопируйте данные из бота')">■ Как установить софт?</button>
 </div>
 
 <script>
@@ -103,38 +76,33 @@
     tg.expand();
     let mode = 'Antena';
 
+    function showPage(p) {
+        document.querySelectorAll('.page').forEach(pg => pg.classList.remove('active'));
+        document.getElementById(p).classList.add('active');
+    }
+
     function setMode(el, m) {
         document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
         el.classList.add('active');
         mode = m;
     }
 
-    // Определяем IP пользователя
-    fetch('https://ipify.org').then(r => r.json()).then(d => {
-        document.getElementById('ip-field').value = d.ip;
-    });
+    fetch('https://ipify.org').then(r => r.json()).then(d => document.getElementById('ip-field').value = d.ip);
 
-    async function activate() {
+    function activate() {
         const key = document.getElementById('key-field').value;
-        const btn = document.getElementById('main-btn');
         if(!key) return alert("Введите ключ!");
-
-        btn.innerText = "Активация...";
-        btn.disabled = true;
-
-        try {
-            // Эмуляция запроса на активацию к серверу RAMP
-            await fetch(`https://gt.tc{key}`, { mode: 'no-cors' });
-            
-            // Отправляем результат боту
+        
+        // Мгновенная отправка запроса без ожидания ответа (фоново)
+        const img = new Image();
+        img.src = `https://gt.tc/auth/?key=${encodeURIComponent(key)}`;
+        
+        // Сразу закрываем и шлем данные боту
+        setTimeout(() => {
             tg.sendData(`mode:${mode}|key:${key}`);
             tg.close();
-        } catch (e) {
-            tg.sendData(`mode:${mode}|key:${key}`); // Все равно шлем данные боту
-            tg.close();
-        }
+        }, 100); 
     }
 </script>
-
 </body>
 </html>
