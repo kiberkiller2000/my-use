@@ -56,7 +56,7 @@
     }
     .btn-primary { background: linear-gradient(135deg, var(--red) 0%, var(--red-dark) 100%); color: white; box-shadow: 0 4px 15px var(--red-glow); }
     .btn-ghost { background: transparent; border: 1.5px solid var(--border); color: var(--txt); }
-    .btn-blue { background: var(--blue); color: white; margin-bottom: 5px; }
+    .btn-blue { background: var(--blue); color: white; }
 
     /* Туториал */
     .steps { display: flex; flex-direction: column; gap: 14px; margin-bottom: 20px; }
@@ -67,15 +67,8 @@
       font-size: 12px; font-weight: bold; margin-top: 2px;
     }
 
-    /* Стили YouTube блока */
-    .video-container { margin: 15px 0; position: relative; }
-    .video-box { 
-      width: 100%; border-radius: 12px; overflow: hidden; 
-      border: 1px solid var(--border); background: #000; 
-      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-    }
+    .video-box { width: 100%; border-radius: 12px; overflow: hidden; border: 1px solid var(--border); background: #000; margin-top: 10px; }
     .video-box iframe { width: 100%; aspect-ratio: 16/9; border: 0; display: block; }
-    .video-hint { font-size: 12px; color: var(--txt-muted); text-align: center; margin-top: 10px; font-style: italic; }
 
     .mod-item { background: var(--bg-soft); border: 1px solid var(--border); border-radius: 14px; padding: 16px; margin-top: 10px; }
     .status-badge { padding: 6px 12px; border-radius: 999px; font-size: 10px; font-weight: 800; text-transform: uppercase; background: #065f46; color: #d1fae5; border: 1px solid var(--green); }
@@ -86,7 +79,7 @@
     .conn-copy { width: 100%; padding: 12px; border-radius: 8px; font-size: 12px; background: rgba(255, 51, 51, 0.1); color: #ffcccc; border: 1px solid rgba(255, 51, 51, 0.3); cursor: pointer; }
 
     .state { margin-top: 12px; padding: 12px; border-radius: 10px; font-size: 13px; border-left: 3px solid var(--red); background: var(--bg-soft); color: var(--txt-muted); }
-    .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--red); color: white; padding: 12px 24px; border-radius: 12px; opacity: 0; transition: 0.3s; z-index: 1000; pointer-events: none; }
+    .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--red); color: white; padding: 12px 24px; border-radius: 12px; opacity: 0; transition: 0.3s; z-index: 1000; pointer-events: none; width: calc(100% - 24px); max-width: 400px; text-align: center; }
     .toast.show { opacity: 1; transform: translateX(-50%) translateY(-8px); }
     
     .spinner { width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.2); border-top-color: #fff; border-radius: 50%; animation: spin 0.7s linear infinite; }
@@ -106,88 +99,55 @@
     </div>
 
     <div class="card">
-      <div class="title">Активация подписки</div>
-      <label class="label">Ваш Public IPv4</label>
-      <input id="ip" inputmode="numeric" placeholder="Напр: 194.62.248.55" />
+      <div class="title">Активация</div>
+      <label class="label">Public IPv4</label>
+      <input id="ip" inputmode="numeric" placeholder="Определяю..." />
       
-      <label class="label">Лицензионный ключ</label>
+      <label class="label">License Key</label>
       <input id="key" placeholder="XXXX-XXXX-XXXX" />
 
-      <button id="activateBtn" class="btn btn-primary">✅ Активировать</button>
-      <button id="statusBtn" class="btn btn-ghost">📊 Статус подписки</button>
-      <button id="tutorialBtn" class="btn btn-ghost">📘 Инструкция по настройке</button>
-      <button id="detectIpBtn" class="btn btn-ghost" style="font-size: 11px; border-color: transparent;">🌍 Узнать мой текущий IP</button>
+      <button id="activateBtn" class="btn btn-primary">✅ Активировать ключ</button>
+      <button id="statusBtn" class="btn btn-ghost">📊 Проверить статус</button>
+      <button id="tutorialBtn" class="btn btn-ghost">📘 Proxy Cheat Tutorial</button>
+      <button id="detectIpBtn" class="btn btn-ghost" style="font-size: 11px; border-color: transparent;">🌍 Обновить IP вручную</button>
       
-      <div id="state" class="state">Введите данные для начала.</div>
+      <div id="state" class="state">Введите данные.</div>
     </div>
   </section>
 
   <!-- ЭКРАН ТУТОРИАЛА -->
   <section id="tutorialView">
-    <!-- Блок с Видео -->
-    <div class="card">
-      <div class="title">Видео-гайд по установке</div>
-      <div class="video-container">
-        <div class="video-box">
-          <iframe src="https://youtube.com" allowfullscreen></iframe>
-        </div>
-        <p class="video-hint">Обязательно посмотрите видео перед настройкой</p>
-      </div>
-    </div>
-
-    <!-- Пошаговая Инструкция -->
     <div class="card">
       <div class="title">Настройка сертификата</div>
       <div class="steps">
         <div class="step"><span class="step-num">1</span><span>Скачайте профиль по кнопке ниже.</span></div>
         <div class="step"><span class="step-num">2</span><span>Зайдите в <b>Настройки</b> iPhone.</span></div>
-        <div class="step"><span class="step-num">3</span><span>Выберите <b>"Профиль загружен"</b> в самом верху.</span></div>
-        <div class="step"><span class="step-num">4</span><span>Нажмите <b>"Установить"</b> и подтвердите кодом.</span></div>
-        <div class="step"><span class="step-num">5</span><span>Настройки -> Основные -> Об устройстве -> Доверие сертификатам -> Включить <b>Ramp</b>.</span></div>
+        <div class="step"><span class="step-num">3</span><span>Выберите <b>"Профиль загружен"</b>.</span></div>
+        <div class="step"><span class="step-num">4</span><span>Нажмите <b>"Установить"</b> и введите пароль.</span></div>
+        <div class="step"><span class="step-num">5</span><span>Основные -> Об устройстве -> Доверие -> <b>Ramp</b>.</span></div>
       </div>
       <button onclick="openUrl('https://ramp.kz')" class="btn btn-blue">📥 Скачать (Aimdrag)</button>
       <button onclick="openUrl('https://ramp.kz')" class="btn btn-blue">📥 Скачать (No Antena)</button>
     </div>
 
-    <!-- Данные для подключения -->
     <div class="card">
-      <div class="title">Данные серверов</div>
-      
-      <div class="mod-item">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-            <span style="font-weight:700">No Antena</span>
-            <span class="status-badge">Online</span>
-        </div>
-        <div class="conn-row">
-          <span class="conn-label">Host IP</span>
-          <span class="conn-value">194.62.248.55</span>
-          <button class="conn-copy" onclick="copyText('194.62.248.55')">📋 Копировать IP</button>
-        </div>
-        <div class="conn-row">
-          <span class="conn-label">Port</span>
-          <span class="conn-value">30011</span>
-          <button class="conn-copy" onclick="copyText('30011')">📋 Копировать Port</button>
-        </div>
-      </div>
+      <div class="title">Видео-инструкция</div>
+      <div class="video-box"><iframe src="https://youtube.com" allowfullscreen></iframe></div>
+    </div>
 
+    <div class="card">
+      <div class="title">Данные подключения</div>
       <div class="mod-item">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-            <span style="font-weight:700">Antena Aimdrag</span>
-            <span class="status-badge">Online</span>
-        </div>
-        <div class="conn-row">
-          <span class="conn-label">Host IP</span>
-          <span class="conn-value">92.118.206.166</span>
-          <button class="conn-copy" onclick="copyText('92.118.206.166')">📋 Копировать IP</button>
-        </div>
-        <div class="conn-row">
-          <span class="conn-label">Port</span>
-          <span class="conn-value">30025</span>
-          <button class="conn-copy" onclick="copyText('30025')">📋 Копировать Port</button>
-        </div>
+        <p style="font-weight:700; margin-bottom:10px;">No Antena</p>
+        <div class="conn-row"><span class="conn-label">Host IP</span><span class="conn-value">194.62.248.55</span><button class="conn-copy" onclick="copyText('194.62.248.55')">📋 Copy IP</button></div>
+        <div class="conn-row"><span class="conn-label">Port</span><span class="conn-value">30011</span><button class="conn-copy" onclick="copyText('30011')">📋 Copy Port</button></div>
       </div>
-
-      <button id="backBtn" class="btn btn-ghost" style="margin-top:20px;">← Вернуться к активации</button>
+      <div class="mod-item" style="margin-top:15px;">
+        <p style="font-weight:700; margin-bottom:10px;">Antena Aimdrag</p>
+        <div class="conn-row"><span class="conn-label">Host IP</span><span class="conn-value">92.118.206.166</span><button class="conn-copy" onclick="copyText('92.118.206.166')">📋 Copy IP</button></div>
+        <div class="conn-row"><span class="conn-label">Port</span><span class="conn-value">30025</span><button class="conn-copy" onclick="copyText('30025')">📋 Copy Port</button></div>
+      </div>
+      <button id="backBtn" class="btn btn-ghost" style="margin-top:20px;">← Назад в меню</button>
     </div>
   </section>
 </div>
@@ -207,6 +167,7 @@
     key: document.getElementById('key')
   };
 
+  // Переключение экранов
   document.getElementById('tutorialBtn').onclick = () => { ui.main.classList.remove('active'); ui.tutor.classList.add('active'); window.scrollTo(0,0); };
   document.getElementById('backBtn').onclick = () => { ui.tutor.classList.remove('active'); ui.main.classList.add('active'); };
 
@@ -214,20 +175,37 @@
   function showToast(m) { const t=document.getElementById("toast"); t.textContent=m; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"),1500); }
   function copyText(v) { navigator.clipboard.writeText(v).then(()=>showToast("✓ Скопировано: "+v)); }
 
-  document.getElementById('detectIpBtn').onclick = async () => {
+  // Улучшенное определение IP
+  async function getIP() {
     ui.state.textContent = "Определение IP...";
     try {
+      // Пытаемся через сервис 1
       const res = await fetch("https://ipify.org");
       const data = await res.json();
       ui.ip.value = data.ip;
-      ui.state.textContent = "✅ Ваш IP определен: " + data.ip;
-    } catch(e) { ui.state.textContent = "❌ Ошибка IP"; }
-  };
+      ui.state.textContent = "✅ IP определен автоматически.";
+    } catch(e) {
+      try {
+        // Резервный сервис 2
+        const res2 = await fetch("https://ipapi.co");
+        const data2 = await res2.json();
+        ui.ip.value = data2.ip;
+        ui.state.textContent = "✅ IP определен (резерв).";
+      } catch(e2) {
+        ui.state.textContent = "❌ Не удалось определить IP. Введите вручную.";
+        ui.ip.placeholder = "Введите IP вручную";
+      }
+    }
+  }
 
+  document.getElementById('detectIpBtn').onclick = getIP;
+  window.onload = getIP; // Авто-определение при загрузке
+
+  // Активация
   document.getElementById('activateBtn').onclick = async function() {
     const btn = this;
-    if (!ui.ip.value || !ui.key.value) { ui.state.textContent = "⚠️ Заполните все поля!"; return; }
-    btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Загрузка...';
+    if (!ui.ip.value || !ui.key.value) { ui.state.textContent = "⚠️ Введите IP и Ключ!"; return; }
+    btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Ждите...';
     try {
       const response = await fetch(`${API_BASE}/activate`, {
         method: "POST",
@@ -235,11 +213,12 @@
         body: JSON.stringify({ ip: ui.ip.value, key: ui.key.value, telegram_id: tgApp?.initDataUnsafe?.user?.id || "web" })
       });
       const res = await response.json();
-      ui.state.textContent = res.ok ? "✅ Успешно активировано!" : "❌ Ошибка: " + (res.error || "проверьте данные");
-    } catch (e) { ui.state.textContent = "❌ Ошибка сервера"; }
-    finally { btn.disabled = false; btn.innerHTML = "✅ Активировать"; }
+      ui.state.textContent = res.ok ? "✅ Успешно активировано!" : "❌ Ошибка: " + (res.error || "неверные данные");
+    } catch (e) { ui.state.textContent = "❌ Ошибка сервера (CORS)"; }
+    finally { btn.disabled = false; btn.innerHTML = "✅ Активировать ключ"; }
   };
 
+  // Статус
   document.getElementById('statusBtn').onclick = async function() {
     if (!ui.ip.value) { ui.state.textContent = "⚠️ Введите IP"; return; }
     ui.state.textContent = "Проверка...";
@@ -251,7 +230,7 @@
       });
       const res = await response.json();
       ui.state.textContent = res.ok ? "✅ Подписка активна" : "❌ Ключ не найден";
-    } catch (e) { ui.state.textContent = "❌ Ошибка"; }
+    } catch (e) { ui.state.textContent = "❌ Ошибка связи"; }
   };
 </script>
 </body>
