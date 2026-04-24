@@ -3,139 +3,122 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>RAMP — Auth & Proxy</title>
+    <title>RAMP — Активация ключа</title>
     <script src="https://telegram.org"></script>
     <style>
         :root {
-            --bg-color: #0b0e14;
-            --card-bg: #121620;
-            --border-color: #1c2230;
-            --text-main: #ffffff;
-            --text-secondary: #636e81;
-            --blue-gradient: linear-gradient(90deg, #00d2ff 0%, #3a7bd5 100%);
-            --red-accent: #da0000;
-            --green-accent: #238636;
+            --bg-color: #0d1117;
+            --card-bg: #161b22;
+            --border-color: #30363d;
+            --text-main: #f0f6fc;
+            --text-secondary: #8b949e;
+            --blue-btn: linear-gradient(180deg, #00d2ff 0%, #3a7bd5 100%);
         }
 
         body {
-            background-color: var(--bg-color);
+            background-color: #0b0e14;
             color: var(--text-main);
-            font-family: -apple-system, sans-serif;
-            margin: 0; padding: 15px;
+            font-family: -apple-system, system-ui, sans-serif;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
         }
 
         .container {
             background: var(--card-bg);
             border: 1px solid var(--border-color);
-            border-radius: 16px;
-            padding: 20px;
-            max-width: 400px;
-            margin: 0 auto;
+            border-radius: 12px;
+            padding: 24px;
+            width: 100%;
+            max-width: 380px;
+            box-sizing: border-box;
         }
 
-        .header { text-align: center; margin-bottom: 20px; }
-        .badge { background: #442222; color: #ff4444; padding: 4px 12px; border-radius: 20px; font-size: 11px; margin-bottom: 8px; display: inline-block; }
+        .header { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+        .logo { background: #00f2ff; color: black; font-weight: bold; width: 30px; height: 30px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 16px; }
+        .title { font-size: 18px; font-weight: 700; }
+        .subtitle { color: var(--text-secondary); font-size: 12px; margin-bottom: 25px; }
+
+        .label { font-size: 11px; text-transform: uppercase; color: var(--text-secondary); font-weight: 600; margin-bottom: 8px; letter-spacing: 0.5px; }
         
-        .section-title { font-size: 14px; font-weight: bold; margin: 15px 0 10px; display: flex; align-items: center; gap: 8px; }
-        
-        .input-group { margin-bottom: 12px; }
-        label { display: block; color: var(--text-secondary); font-size: 11px; margin-bottom: 5px; text-transform: uppercase; }
-        
-        .input-wrapper { background: #0b0e14; border: 1px solid var(--border-color); border-radius: 8px; padding: 10px; display: flex; }
+        .input-wrapper { background: #0d1117; border: 1px solid var(--border-color); border-radius: 10px; padding: 14px; margin-bottom: 20px; }
         input { background: transparent; border: none; color: white; width: 100%; outline: none; font-size: 14px; }
+        input::placeholder { color: #484f58; }
 
-        .proxy-options { display: flex; gap: 10px; margin-bottom: 15px; }
-        .option { 
-            flex: 1; background: #0b0e14; border: 1px solid var(--border-color); 
-            padding: 10px; border-radius: 8px; text-align: center; font-size: 12px; cursor: pointer;
+        .mode-selector { display: flex; gap: 8px; margin-bottom: 20px; }
+        .mode-btn { 
+            flex: 1; background: #21262d; border: 1px solid var(--border-color); 
+            padding: 10px; border-radius: 8px; text-align: center; font-size: 12px; 
+            cursor: pointer; color: var(--text-secondary);
         }
-        .option.active { border-color: #3a7bd5; background: rgba(58, 123, 213, 0.1); color: #00d2ff; }
+        .mode-btn.active { border-color: #58a6ff; color: #58a6ff; background: rgba(88, 166, 255, 0.1); }
+
+        .info-text { font-size: 12px; color: #484f58; line-height: 1.4; margin-bottom: 25px; }
 
         .btn {
-            width: 100%; padding: 14px; border-radius: 10px; border: none;
-            font-weight: bold; font-size: 14px; cursor: pointer; margin-top: 10px;
+            width: 100%; padding: 14px; border-radius: 10px; font-weight: 700;
+            border: none; cursor: pointer; margin-bottom: 10px; font-size: 15px;
+            display: flex; align-items: center; justify-content: center; gap: 8px;
         }
-        .btn-red { background: var(--red-accent); color: white; }
-        .btn-green { background: var(--green-accent); color: white; }
-        .btn-outline { background: transparent; border: 1px solid var(--border-color); color: white; }
+        .btn-blue { background: var(--blue-btn); color: #000; }
+        .btn-dark { background: #21262d; color: white; border: 1px solid var(--border-color); }
     </style>
 </head>
 <body>
 
 <div class="container">
     <div class="header">
-        <div class="badge">⚡ Mrwanx Proxy Mini App</div>
-        <div style="font-size: 18px; font-weight: bold;">Faster Activation • Premium UI</div>
+        <div class="logo">R</div>
+        <div class="title">RAMP — Авторизация</div>
+    </div>
+    <div class="subtitle">Привязка лицензии к вашему IP</div>
+
+    <div class="label">ВАШ ТЕКУЩИЙ IP</div>
+    <div class="input-wrapper">
+        <input type="text" id="ip-field" readonly value="Определяем...">
     </div>
 
-    <div class="section-title">🔐 Activation & Status</div>
-    
-    <div class="input-group">
-        <label>Public IPv4</label>
-        <div class="input-wrapper">
-            <input type="text" id="ip-field" placeholder="1.2.3.4">
-        </div>
+    <div class="label">ЛИЦЕНЗИОННЫЙ КЛЮЧ</div>
+    <div class="input-wrapper">
+        <input type="text" id="key-field" placeholder="XXXX-XXXX-XXXX-XXXX">
     </div>
 
-    <div class="input-group">
-        <label>License Key</label>
-        <div class="input-wrapper">
-            <input type="text" id="key-field" placeholder="XXXX-XXXX-XXXX-XXXX">
-        </div>
+    <div class="label">ВЫБЕРИТЕ РЕЖИМ</div>
+    <div class="mode-selector">
+        <div class="mode-btn active" onclick="setMode(this, 'Antena')">Antena</div>
+        <div class="mode-btn" onclick="setMode(this, 'No Antena')">No Antena</div>
     </div>
 
-    <button class="btn btn-red" onclick="sendData()">✅ Activate Key</button>
-    <button class="btn btn-green">📊 Check Status</button>
-
-    <div class="section-title">📡 Proxy Settings</div>
-    <div class="proxy-options">
-        <div class="option active" onclick="setMode(this, 'Antena')">📡 Antena</div>
-        <div class="option" onclick="setMode(this, 'No Antena')">🚫 No Antena</div>
+    <div class="info-text">
+        Ваш IP будет привязан к ключу. Это необходимо для работы софта.
     </div>
 
-    <button class="btn btn-outline" onclick="detectIP()">🌍 Detect My Public IP</button>
-    <button class="btn btn-outline" onclick="autoFormat()">✨ Auto-format Key</button>
+    <button class="btn btn-blue" onclick="send()">Привязать / Проверить</button>
+    <button class="btn btn-dark">■ Как установить софт?</button>
 </div>
 
 <script>
     const tg = window.Telegram.WebApp;
     tg.expand();
+    let mode = 'Antena';
 
-    let currentMode = 'Antena';
-
-    function setMode(el, mode) {
-        document.querySelectorAll('.option').forEach(opt => opt.classList.remove('active'));
+    function setMode(el, m) {
+        document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
         el.classList.add('active');
-        currentMode = mode;
+        mode = m;
     }
 
-    async function detectIP() {
-        const field = document.getElementById('ip-field');
-        field.value = "Loading...";
-        try {
-            const res = await fetch('https://ipify.org');
-            const data = await res.json();
-            field.value = data.ip;
-        } catch (e) { field.value = "Error"; }
-    }
+    fetch('https://ipify.org').then(r => r.json()).then(d => {
+        document.getElementById('ip-field').value = d.ip;
+    });
 
-    function autoFormat() {
-        let key = document.getElementById('key-field').value.toUpperCase().replace(/[^A-Z0-9]/g, '');
-        let formatted = key.match(/.{1,4}/g)?.join('-') || key;
-        document.getElementById('key-field').value = formatted.substring(0, 19);
-    }
-
-    function sendData() {
-        const ip = document.getElementById('ip-field').value;
+    function send() {
         const key = document.getElementById('key-field').value;
-        
-        if(!ip || !key) return alert("Fill all fields!");
-
-        tg.sendData(`action:activate|key:${key}|ip:${ip}|mode:${currentMode}`);
+        if(!key) return alert("Введите ключ!");
+        tg.sendData(`mode:${mode}|key:${key}`);
         tg.close();
     }
-
-    detectIP();
 </script>
 
 </body>
