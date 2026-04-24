@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>RAMP — Client</title>
+    <title>RAMP — Auth & Proxy</title>
     <script src="https://telegram.org"></script>
     <style>
         :root {
@@ -12,151 +12,131 @@
             --border-color: #1c2230;
             --text-main: #ffffff;
             --text-secondary: #636e81;
-            --accent-green: #10b981;
             --blue-gradient: linear-gradient(90deg, #00d2ff 0%, #3a7bd5 100%);
+            --red-accent: #da0000;
+            --green-accent: #238636;
         }
 
         body {
             background-color: var(--bg-color);
             color: var(--text-main);
-            font-family: 'Inter', -apple-system, sans-serif;
-            margin: 0;
-            padding: 15px;
-            overflow: hidden;
-        }
-
-        /* Анимация появления */
-        .page {
-            display: none;
-            animation: fadeIn 0.4s ease;
-        }
-        .page.active { display: block; }
-
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
+            font-family: -apple-system, sans-serif;
+            margin: 0; padding: 15px;
         }
 
         .container {
             background: var(--card-bg);
             border: 1px solid var(--border-color);
             border-radius: 16px;
-            padding: 24px;
-            width: 100%;
-            box-sizing: border-box;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            padding: 20px;
+            max-width: 400px;
+            margin: 0 auto;
         }
 
-        .header { display: flex; align-items: center; gap: 12px; margin-bottom: 5px; }
-        .logo { background: #00f2ff; color: black; font-weight: bold; width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; }
-        .title { font-size: 18px; font-weight: 700; }
-        .subtitle { color: var(--text-secondary); font-size: 12px; margin-bottom: 20px; }
-
-        .label { font-size: 11px; text-transform: uppercase; color: var(--text-secondary); font-weight: 700; margin-bottom: 8px; }
-        .input-wrapper { background: #0b0e14; border: 1px solid var(--border-color); border-radius: 10px; padding: 12px; margin-bottom: 15px; }
-        input { background: transparent; border: none; color: white; width: 100%; outline: none; font-size: 14px; }
+        .header { text-align: center; margin-bottom: 20px; }
+        .badge { background: #442222; color: #ff4444; padding: 4px 12px; border-radius: 20px; font-size: 11px; margin-bottom: 8px; display: inline-block; }
         
-        .info-text { font-size: 12px; color: var(--text-secondary); line-height: 1.5; margin-bottom: 20px; }
-        #user-ip { color: #3a7bd5; font-weight: bold; }
+        .section-title { font-size: 14px; font-weight: bold; margin: 15px 0 10px; display: flex; align-items: center; gap: 8px; }
+        
+        .input-group { margin-bottom: 12px; }
+        label { display: block; color: var(--text-secondary); font-size: 11px; margin-bottom: 5px; text-transform: uppercase; }
+        
+        .input-wrapper { background: #0b0e14; border: 1px solid var(--border-color); border-radius: 8px; padding: 10px; display: flex; }
+        input { background: transparent; border: none; color: white; width: 100%; outline: none; font-size: 14px; }
+
+        .proxy-options { display: flex; gap: 10px; margin-bottom: 15px; }
+        .option { 
+            flex: 1; background: #0b0e14; border: 1px solid var(--border-color); 
+            padding: 10px; border-radius: 8px; text-align: center; font-size: 12px; cursor: pointer;
+        }
+        .option.active { border-color: #3a7bd5; background: rgba(58, 123, 213, 0.1); color: #00d2ff; }
 
         .btn {
-            width: 100%;
-            padding: 14px;
-            border-radius: 12px;
-            font-weight: 700;
-            border: none;
-            cursor: pointer;
-            margin-bottom: 10px;
-            transition: 0.2s;
+            width: 100%; padding: 14px; border-radius: 10px; border: none;
+            font-weight: bold; font-size: 14px; cursor: pointer; margin-top: 10px;
         }
-        .btn-primary { background: var(--blue-gradient); color: #000; }
-        .btn-secondary { background: #1c2230; color: white; border: 1px solid var(--border-color); }
-
-        /* Стили туториала */
-        .step { margin-bottom: 15px; padding-left: 30px; position: relative; font-size: 14px; color: #cbd5e1; }
-        .step::before {
-            content: attr(data-step);
-            position: absolute; left: 0; top: 0;
-            width: 20px; height: 20px;
-            background: #3a7bd5; border-radius: 50%;
-            display: flex; align-items: center; justify-content: center;
-            font-size: 12px; color: black; font-weight: bold;
-        }
+        .btn-red { background: var(--red-accent); color: white; }
+        .btn-green { background: var(--green-accent); color: white; }
+        .btn-outline { background: transparent; border: 1px solid var(--border-color); color: white; }
     </style>
 </head>
 <body>
 
-    <!-- СТРАНИЦА 1: АКТИВАЦИЯ -->
-    <div id="page-auth" class="page active">
-        <div class="container">
-            <div class="header">
-                <div class="logo">R</div>
-                <div class="title">RAMP — Авторизация</div>
-            </div>
-            <div class="subtitle">Привязка лицензии к вашему IP</div>
+<div class="container">
+    <div class="header">
+        <div class="badge">⚡ Mrwanx Proxy Mini App</div>
+        <div style="font-size: 18px; font-weight: bold;">Faster Activation • Premium UI</div>
+    </div>
 
-            <div class="label">ВАШ ТЕКУЩИЙ IP</div>
-            <div class="input-wrapper">
-                <input type="text" id="display-ip" readonly value="Определяем...">
-            </div>
-
-            <div class="label">ЛИЦЕНЗИОННЫЙ КЛЮЧ</div>
-            <div class="input-wrapper">
-                <input type="text" id="license-key" placeholder="XXXX-XXXX-XXXX-XXXX">
-            </div>
-
-            <div class="info-text">
-                Ваш IP <span id="user-ip">...</span> будет привязан к ключу. Это необходимо для работы софта.
-            </div>
-
-            <button class="btn btn-primary" onclick="sendToBot()">Привязать / Проверить</button>
-            <button class="btn btn-secondary" onclick="showPage('page-tutorial')">📖 Как установить софт?</button>
+    <div class="section-title">🔐 Activation & Status</div>
+    
+    <div class="input-group">
+        <label>Public IPv4</label>
+        <div class="input-wrapper">
+            <input type="text" id="ip-field" placeholder="1.2.3.4">
         </div>
     </div>
 
-    <!-- СТРАНИЦА 2: ТУТОРИАЛ -->
-    <div id="page-tutorial" class="page">
-        <div class="container">
-            <div class="header">
-                <div class="title">📖 Инструкция iPhone</div>
-            </div>
-            <div class="subtitle">Как запустить софт на iOS</div>
-
-            <div class="step" data-step="1">Скачайте профиль по кнопке ниже.</div>
-            <div class="step" data-step="2">Зайдите в <b>Настройки</b> iPhone.</div>
-            <div class="step" data-step="3">Выберите <b>"Профиль загружен"</b> вверху или Основные -> Управление устройством.</div>
-            <div class="step" data-step="4">Нажмите <b>"Установить"</b> и введите пароль от телефона.</div>
-
-            <button class="btn btn-primary" onclick="window.location.href='https://xn----8sbe2ac0axdh.com'">📥 Скачать профиль</button>
-            <button class="btn btn-secondary" onclick="showPage('page-auth')">⬅️ Назад к активации</button>
+    <div class="input-group">
+        <label>License Key</label>
+        <div class="input-wrapper">
+            <input type="text" id="key-field" placeholder="XXXX-XXXX-XXXX-XXXX">
         </div>
     </div>
 
-    <script>
-        const tg = window.Telegram.WebApp;
-        tg.expand();
+    <button class="btn btn-red" onclick="sendData()">✅ Activate Key</button>
+    <button class="btn btn-green">📊 Check Status</button>
 
-        function showPage(pageId) {
-            document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-            document.getElementById(pageId).classList.add('active');
-        }
+    <div class="section-title">📡 Proxy Settings</div>
+    <div class="proxy-options">
+        <div class="option active" onclick="setMode(this, 'Antena')">📡 Antena</div>
+        <div class="option" onclick="setMode(this, 'No Antena')">🚫 No Antena</div>
+    </div>
 
-        // IP Detect
-        fetch('https://ipify.org')
-            .then(res => res.json())
-            .then(data => {
-                document.getElementById('user-ip').innerText = data.ip;
-                document.getElementById('display-ip').value = data.ip;
-            });
+    <button class="btn btn-outline" onclick="detectIP()">🌍 Detect My Public IP</button>
+    <button class="btn btn-outline" onclick="autoFormat()">✨ Auto-format Key</button>
+</div>
 
-        function sendToBot() {
-            const key = document.getElementById('license-key').value;
-            const ip = document.getElementById('user-ip').innerText;
-            if(key.length < 5) return alert("Введите ключ!");
-            
-            tg.sendData(`activated:${key}|ip:${ip}`);
-            tg.close();
-        }
-    </script>
+<script>
+    const tg = window.Telegram.WebApp;
+    tg.expand();
+
+    let currentMode = 'Antena';
+
+    function setMode(el, mode) {
+        document.querySelectorAll('.option').forEach(opt => opt.classList.remove('active'));
+        el.classList.add('active');
+        currentMode = mode;
+    }
+
+    async function detectIP() {
+        const field = document.getElementById('ip-field');
+        field.value = "Loading...";
+        try {
+            const res = await fetch('https://ipify.org');
+            const data = await res.json();
+            field.value = data.ip;
+        } catch (e) { field.value = "Error"; }
+    }
+
+    function autoFormat() {
+        let key = document.getElementById('key-field').value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+        let formatted = key.match(/.{1,4}/g)?.join('-') || key;
+        document.getElementById('key-field').value = formatted.substring(0, 19);
+    }
+
+    function sendData() {
+        const ip = document.getElementById('ip-field').value;
+        const key = document.getElementById('key-field').value;
+        
+        if(!ip || !key) return alert("Fill all fields!");
+
+        tg.sendData(`action:activate|key:${key}|ip:${ip}|mode:${currentMode}`);
+        tg.close();
+    }
+
+    detectIP();
+</script>
+
 </body>
 </html>
