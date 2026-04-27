@@ -64,7 +64,7 @@
     .conn-label { font-size: 10px; color: var(--txt-muted); text-transform: uppercase; font-weight: 700; }
     .conn-value { font-family: monospace; font-size: 13px; color: var(--red); background: var(--bg-card); padding: 10px; border-radius: 8px; text-align: center; }
     .conn-copy { width: 100%; padding: 12px; border-radius: 8px; font-size: 12px; background: rgba(255, 51, 51, 0.1); color: #ffcccc; border: 1px solid rgba(255, 51, 51, 0.3); cursor: pointer; }
-    .state { margin-top: 12px; padding: 12px; border-radius: 10px; font-size: 13px; border-left: 3px solid var(--red); background: var(--bg-soft); color: var(--txt-muted); min-height: 40px; }
+    .state { margin-top: 12px; padding: 12px; border-radius: 10px; font-size: 13px; border-left: 3px solid var(--red); background: var(--bg-soft); color: var(--txt-muted); min-height: 40px; transition: 0.3s; }
     .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--red); color: white; padding: 12px 24px; border-radius: 12px; opacity: 0; transition: 0.3s; z-index: 1000; pointer-events: none; text-align: center; }
     .toast.show { opacity: 1; transform: translateX(-50%) translateY(-8px); }
     .spinner { width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.2); border-top-color: #fff; border-radius: 50%; animation: spin 0.7s linear infinite; }
@@ -153,44 +153,41 @@
     toast: document.getElementById('toast')
   };
 
-  // Навигация
-  document.getElementById('tutorialBtn').onclick = () => {
-    ui.main.classList.remove('active');
-    ui.tutor.classList.add('active');
-    window.scrollTo(0,0);
-  };
-  document.getElementById('backBtn').onclick = () => {
-    ui.tutor.classList.remove('active');
-    ui.main.classList.add('active');
-  };
+  document.getElementById('tutorialBtn').onclick = () => { ui.main.classList.remove('active'); ui.tutor.classList.add('active'); window.scrollTo(0,0); };
+  document.getElementById('backBtn').onclick = () => { ui.tutor.classList.remove('active'); ui.main.classList.add('active'); };
 
-  function openUrl(url) {
-    if (tgApp?.openLink) tgApp.openLink(url);
-    else window.open(url, "_blank");
-  }
+  function openUrl(url) { if (tgApp?.openLink) tgApp.openLink(url); else window.open(url, "_blank"); }
+  function showToast(m) { ui.toast.textContent = m; ui.toast.classList.add("show"); setTimeout(() => ui.toast.classList.remove("show"), 1500); }
+  function copyText(v) { navigator.clipboard.writeText(v).then(() => showToast("✓ Скопировано")); }
 
-  function showToast(m) {
-    ui.toast.textContent = m;
-    ui.toast.classList.add("show");
-    setTimeout(() => ui.toast.classList.remove("show"), 1500);
-  }
-
-  function copyText(v) {
-    navigator.clipboard.writeText(v).then(() => showToast("✓ Скопировано: " + v));
-  }
-
-  // АВТО-ОПРЕДЕЛЕНИЕ IP (Исправлено)
+  // МНОГОУРОВНЕВОЕ ОПРЕДЕЛЕНИЕ IP
   async function getIP() {
     ui.state.textContent = "Определение IP...";
-    try {
-      const res = await fetch("https://ipify.org");
-      if (!res.ok) throw new Error();
-      const data = await res.json();
-      ui.ip.value = data.ip;
-      ui.state.textContent = "✅ IP определен автоматически.";
-    } catch(e) {
-      ui.state.textContent = "⚠️ Не удалось определить IP. Введите вручную.";
+    ui.state.style.color = "var(--txt-muted)";
+
+    const providers = [
+      "https://ipify.org",
+      "https://ipinfo.io",
+      "https://ipify.org"
+    ];
+
+    for (const url of providers) {
+      try {
+        const res = await fetch(url, { timeout: 5000 });
+        if (!res.ok) continue;
+        const data = await res.json();
+        const foundIp = data.ip || data.ip_addr;
+        if (foundIp) {
+          ui.ip.value = foundIp;
+          ui.state.textContent = "✅ IP определен успешно";
+          ui.state.style.color = "var(--green)";
+          return;
+        }
+      } catch (e) { console.error("Skip provider:", url); }
     }
+
+    ui.state.textContent = "⚠️ Не удалось определить IP автоматически. Введите его вручную.";
+    ui.state.style.color = "var(--red)";
   }
 
   window.onload = getIP;
@@ -198,65 +195,43 @@
 
   // АКТИВАЦИЯ
   document.getElementById('activateBtn').onclick = async function() {
+    if (!ui.ip.value || !ui.key.value) { ui.state.textContent = "⚠️ Заполните IP и Ключ!"; return; }
     const btn = this;
-    if (!ui.ip.value || !ui.key.value) {
-      ui.state.textContent = "⚠️ Заполните все поля!";
-      return;
-    }
-    
     btn.disabled = true;
-    btn.innerHTML = '<span class="spinner"></span> Ждите...';
-    ui.state.textContent = "Связь с сервером...";
+    btn.innerHTML = '<span class="spinner"></span>';
+    ui.state.textContent = "Активация...";
     
     try {
-      const targetUrl = `${API_BASE}/activate`;
-      const url = PROXY + encodeURIComponent(targetUrl);
-      
+      const url = PROXY + encodeURIComponent(`${API_BASE}/activate`);
       const response = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           ip: ui.ip.value, 
           key: ui.key.value, 
-          telegram_id: tgApp?.initDataUnsafe?.user?.id || "web_user" 
+          tid: tgApp?.initDataUnsafe?.user?.id || "0" 
         })
       });
-      
       const res = await response.json();
-      if (res.ok) {
-        ui.state.textContent = "✅ Успешно активировано!";
-        ui.state.style.color = "var(--green)";
-      } else {
-        ui.state.textContent = "❌ Ошибка: " + (res.error || "неверный ключ");
-      }
-    } catch (e) {
-      ui.state.textContent = "❌ Ошибка сети. Попробуйте еще раз.";
-    } finally {
-      btn.disabled = false;
-      btn.innerHTML = "✅ Активировать ключ";
-    }
+      ui.state.textContent = res.ok ? "✅ Ключ активирован!" : "❌ " + (res.error || "Ошибка ключа");
+    } catch (e) { ui.state.textContent = "❌ Ошибка сервера"; }
+    finally { btn.disabled = false; btn.innerHTML = "✅ Активировать ключ"; }
   };
 
   // СТАТУС
   document.getElementById('statusBtn').onclick = async function() {
-    if (!ui.ip.value) { ui.state.textContent = "⚠️ Сначала определите IP"; return; }
-    ui.state.textContent = "Проверка статуса...";
-    
+    if (!ui.ip.value) return;
+    ui.state.textContent = "Проверка...";
     try {
-      const targetUrl = `${API_BASE}/status`;
-      const url = PROXY + encodeURIComponent(targetUrl);
-      
+      const url = PROXY + encodeURIComponent(`${API_BASE}/status`);
       const response = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ip: ui.ip.value })
       });
-      
       const res = await response.json();
-      ui.state.textContent = res.ok ? "✅ Подписка активна" : "❌ Ключ не найден или истек";
-    } catch (e) {
-      ui.state.textContent = "❌ Ошибка связи с сервером";
-    }
+      ui.state.textContent = res.ok ? "✅ Подписка активна" : "❌ Нет активной подписки";
+    } catch (e) { ui.state.textContent = "❌ Ошибка связи"; }
   };
 </script>
 </body>
