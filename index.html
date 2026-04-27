@@ -60,13 +60,12 @@
     .video-box { width: 100%; border-radius: 12px; overflow: hidden; border: 1px solid var(--border); background: #000; margin-top: 10px; }
     .video-box iframe { width: 100%; aspect-ratio: 16/9; border: 0; display: block; }
     .mod-item { background: var(--bg-soft); border: 1px solid var(--border); border-radius: 14px; padding: 16px; margin-top: 10px; }
-    .status-badge { padding: 6px 12px; border-radius: 999px; font-size: 10px; font-weight: 800; text-transform: uppercase; background: #065f46; color: #d1fae5; border: 1px solid var(--green); }
     .conn-row { display: flex; flex-direction: column; gap: 6px; padding: 12px; background: var(--bg); border-radius: 10px; border: 1px solid var(--border); margin-top: 8px; }
     .conn-label { font-size: 10px; color: var(--txt-muted); text-transform: uppercase; font-weight: 700; }
     .conn-value { font-family: monospace; font-size: 13px; color: var(--red); background: var(--bg-card); padding: 10px; border-radius: 8px; text-align: center; }
     .conn-copy { width: 100%; padding: 12px; border-radius: 8px; font-size: 12px; background: rgba(255, 51, 51, 0.1); color: #ffcccc; border: 1px solid rgba(255, 51, 51, 0.3); cursor: pointer; }
-    .state { margin-top: 12px; padding: 12px; border-radius: 10px; font-size: 13px; border-left: 3px solid var(--red); background: var(--bg-soft); color: var(--txt-muted); }
-    .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--red); color: white; padding: 12px 24px; border-radius: 12px; opacity: 0; transition: 0.3s; z-index: 1000; pointer-events: none; width: calc(100% - 24px); max-width: 400px; text-align: center; }
+    .state { margin-top: 12px; padding: 12px; border-radius: 10px; font-size: 13px; border-left: 3px solid var(--red); background: var(--bg-soft); color: var(--txt-muted); min-height: 40px; }
+    .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--red); color: white; padding: 12px 24px; border-radius: 12px; opacity: 0; transition: 0.3s; z-index: 1000; pointer-events: none; text-align: center; }
     .toast.show { opacity: 1; transform: translateX(-50%) translateY(-8px); }
     .spinner { width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.2); border-top-color: #fff; border-radius: 50%; animation: spin 0.7s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
@@ -87,14 +86,14 @@
     <div class="card">
       <div class="title">Активация</div>
       <label class="label">Public IPv4</label>
-      <input id="ip" inputmode="numeric" placeholder="Определяю..." />
+      <input id="ip" inputmode="decimal" placeholder="Определяю..." />
       <label class="label">License Key</label>
       <input id="key" placeholder="XXXX-XXXX-XXXX" />
       <button id="activateBtn" class="btn btn-primary">✅ Активировать ключ</button>
       <button id="statusBtn" class="btn btn-ghost">📊 Проверить статус</button>
       <button id="tutorialBtn" class="btn btn-ghost">📘 Proxy Cheat Tutorial</button>
       <button id="detectIpBtn" class="btn btn-ghost" style="font-size: 11px; border-color: transparent;">🌍 Обновить IP вручную</button>
-      <div id="state" class="state">Введите данные.</div>
+      <div id="state" class="state">Ожидание данных...</div>
     </div>
   </section>
 
@@ -107,10 +106,10 @@
         <div class="step"><span class="step-num">2</span><span>Зайдите в <b>Настройки</b> iPhone.</span></div>
         <div class="step"><span class="step-num">3</span><span>Выберите <b>"Профиль загружен"</b>.</span></div>
         <div class="step"><span class="step-num">4</span><span>Нажмите <b>"Установить"</b>.</span></div>
-        <div class="step"><span class="step-num">5</span><span>Настройки -> Основные -> Об устройстве -> Доверие -> <b>Ramp</b>.</span></div>
+        <div class="step"><span class="step-num">5</span><span>Основные -> Об устройстве -> Доверие -> <b>Ramp</b>.</span></div>
       </div>
-      <button onclick="openUrl('https://ramp.kz/RampAntena.pem')" class="btn btn-blue">📥 Скачать (Aimdrag)</button>
-      <button onclick="openUrl('https://ramp.kz/RampProxy.pem')" class="btn btn-blue">📥 Скачать (No Antena)</button>
+      <button onclick="openUrl('https://ramp.kz')" class="btn btn-blue">📥 Скачать (Aimdrag)</button>
+      <button onclick="openUrl('https://ramp.kz')" class="btn btn-blue">📥 Скачать (No Antena)</button>
     </div>
     <div class="card">
       <div class="title">Видео-инструкция</div>
@@ -137,46 +136,82 @@
 
 <script>
   const API_BASE = "https://gt.tc"; 
-  const PROXY = "https://corsproxy.io?"; // ОБХОД CORS
+  const PROXY = "https://corsproxy.io?"; 
   const tgApp = window.Telegram?.WebApp;
-  if (tgApp) { tgApp.ready(); tgApp.expand(); }
+  
+  if (tgApp) {
+    tgApp.ready();
+    tgApp.expand();
+  }
 
   const ui = {
     main: document.getElementById('mainView'),
     tutor: document.getElementById('tutorialView'),
     state: document.getElementById('state'),
     ip: document.getElementById('ip'),
-    key: document.getElementById('key')
+    key: document.getElementById('key'),
+    toast: document.getElementById('toast')
   };
 
-  document.getElementById('tutorialBtn').onclick = () => { ui.main.classList.remove('active'); ui.tutor.classList.add('active'); window.scrollTo(0,0); };
-  document.getElementById('backBtn').onclick = () => { ui.tutor.classList.remove('active'); ui.main.classList.add('active'); };
+  // Навигация
+  document.getElementById('tutorialBtn').onclick = () => {
+    ui.main.classList.remove('active');
+    ui.tutor.classList.add('active');
+    window.scrollTo(0,0);
+  };
+  document.getElementById('backBtn').onclick = () => {
+    ui.tutor.classList.remove('active');
+    ui.main.classList.add('active');
+  };
 
-  function openUrl(url) { if (tgApp?.openLink) tgApp.openLink(url); else window.open(url, "_blank"); }
-  function showToast(m) { const t=document.getElementById("toast"); t.textContent=m; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"),1500); }
-  function copyText(v) { navigator.clipboard.writeText(v).then(()=>showToast("✓ Скопировано: "+v)); }
+  function openUrl(url) {
+    if (tgApp?.openLink) tgApp.openLink(url);
+    else window.open(url, "_blank");
+  }
 
+  function showToast(m) {
+    ui.toast.textContent = m;
+    ui.toast.classList.add("show");
+    setTimeout(() => ui.toast.classList.remove("show"), 1500);
+  }
+
+  function copyText(v) {
+    navigator.clipboard.writeText(v).then(() => showToast("✓ Скопировано: " + v));
+  }
+
+  // АВТО-ОПРЕДЕЛЕНИЕ IP (Исправлено)
   async function getIP() {
     ui.state.textContent = "Определение IP...";
     try {
       const res = await fetch("https://ipify.org");
+      if (!res.ok) throw new Error();
       const data = await res.json();
       ui.ip.value = data.ip;
-      ui.state.textContent = "✅ IP определен.";
-    } catch(e) { ui.state.textContent = "⚠️ Введите IP вручную."; }
+      ui.state.textContent = "✅ IP определен автоматически.";
+    } catch(e) {
+      ui.state.textContent = "⚠️ Не удалось определить IP. Введите вручную.";
+    }
   }
 
   window.onload = getIP;
   document.getElementById('detectIpBtn').onclick = getIP;
 
-  // АКТИВАЦИЯ С ОБХОДОМ CORS
+  // АКТИВАЦИЯ
   document.getElementById('activateBtn').onclick = async function() {
     const btn = this;
-    if (!ui.ip.value || !ui.key.value) { ui.state.textContent = "⚠️ Заполните все поля!"; return; }
-    btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Ждите...';
+    if (!ui.ip.value || !ui.key.value) {
+      ui.state.textContent = "⚠️ Заполните все поля!";
+      return;
+    }
+    
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Ждите...';
+    ui.state.textContent = "Связь с сервером...";
     
     try {
-      const url = PROXY + encodeURIComponent(`${API_BASE}/activate`);
+      const targetUrl = `${API_BASE}/activate`;
+      const url = PROXY + encodeURIComponent(targetUrl);
+      
       const response = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -186,26 +221,42 @@
           telegram_id: tgApp?.initDataUnsafe?.user?.id || "web_user" 
         })
       });
+      
       const res = await response.json();
-      ui.state.textContent = res.ok ? "✅ Успешно активировано!" : "❌ Ошибка: " + (res.error || "неверный ключ");
-    } catch (e) { ui.state.textContent = "❌ Ошибка сети (через прокси)"; }
-    finally { btn.disabled = false; btn.innerHTML = "✅ Активировать ключ"; }
+      if (res.ok) {
+        ui.state.textContent = "✅ Успешно активировано!";
+        ui.state.style.color = "var(--green)";
+      } else {
+        ui.state.textContent = "❌ Ошибка: " + (res.error || "неверный ключ");
+      }
+    } catch (e) {
+      ui.state.textContent = "❌ Ошибка сети. Попробуйте еще раз.";
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = "✅ Активировать ключ";
+    }
   };
 
-  // СТАТУС С ОБХОДОМ CORS
+  // СТАТУС
   document.getElementById('statusBtn').onclick = async function() {
-    if (!ui.ip.value) { ui.state.textContent = "⚠️ Введите IP"; return; }
-    ui.state.textContent = "Проверка...";
+    if (!ui.ip.value) { ui.state.textContent = "⚠️ Сначала определите IP"; return; }
+    ui.state.textContent = "Проверка статуса...";
+    
     try {
-      const url = PROXY + encodeURIComponent(`${API_BASE}/status`);
+      const targetUrl = `${API_BASE}/status`;
+      const url = PROXY + encodeURIComponent(targetUrl);
+      
       const response = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ip: ui.ip.value })
       });
+      
       const res = await response.json();
-      ui.state.textContent = res.ok ? "✅ Подписка активна" : "❌ Ключ не найден";
-    } catch (e) { ui.state.textContent = "❌ Ошибка связи"; }
+      ui.state.textContent = res.ok ? "✅ Подписка активна" : "❌ Ключ не найден или истек";
+    } catch (e) {
+      ui.state.textContent = "❌ Ошибка связи с сервером";
+    }
   };
 </script>
 </body>
