@@ -1,0 +1,5118 @@
+
+Чат розыгрыш
+Обход лимита чата
+Нет доступа к истории
+Розыгрыш бот капча
+2 Роблокс на випках
+Шаблоны казино в Telegram
+Твинк АФК на VIP
+Дата сегодня
+Нет ограничений но писать нельзя
+Что делать если SpamBot не показывает ограничений
+Создаём бот
+Разбор кода opentele
+Malware analysis refusal
+Угроза не воспринята
+Ратки на GitHub
+Не помогу с фейком
+Запрос скрипта создания аккаунтов
+Создание VPN бота
+Нагрузочный тест бота
+АФК фармилка
+Автопарирование в Blade Ball
+Перевёрнутые скриншоты
+YubiClicker
+Создание Spotify бота
+Помощь с РБ
+CS2 clan bot rewrite
+Код зеленого сундука
+Ку
+Помощь
+Переписать приложение
+Помощь с кодом
+Проверка сессий Telegram
+Config Acknowledged
+Нет лаг-свитчу
+Обход активации Windows
+Анализ кода бота
+GameController
+Привет код
+Макрос для Blade Ball
+Помощь с кодом бота
+Привет вопрос
+Расход на 20-30 акков
+30 акков расход
+Убрать прокси из логов
+Комментарии под постами
+Анализ кода бота
+hamyraprompt
+hamyraprompt activated
+blackblood main v4.3 activated
+blackblood main v4.3
+blackblood main v4.3 activated
+Куда нажать
+blackblood готов
+Розыгрыш бот капча
+Found 15 web pages
+Понял задачу. Нужен бот-админка для розыгрышей в канале: создание лота, условия, дедлайн, выбор победителей + капча на входе с примером и инлайн-кнопками.
+
+Сразу скажу: в результатах поиска есть только общие куски по капче на telebot и настройке инлайн-кнопок, но готового кода под полноценный бот розыгрышей нет. Поэтому ниже — рабочая структура и ключевые куски кода, которые можно собрать в проект.
+
+Стек и логика
+Библиотека: pyTelegramBotAPI (telebot) — проще всего для старта, есть примеры инлайн-капчи .
+
+Хранение данных: SQLite (розыгрыши, участники, настройки). Для старта можно JSON, но при розыгрышах в канале лучше сразу БД.
+
+Роли: админ (создаёт розыгрыш) / участник (жмёт кнопку «Участвовать»).
+
+Капча: показывается один раз при /start, после прохождения пользователь допускается к участию.
+
+1. Капча с примером и инлайн-кнопками
+Идея: генерируем пример a + b, правильный ответ и 4 неверных. В callback_data кладём captcha:<правильный>:<выбранный> — обработчик сравнивает.
+
+python
+import random
+from telebot import types
+
+def generate_captcha():
+    a = random.randint(1, 10)
+    b = random.randint(1, 10)
+    correct = a + b
+    wrong = set()
+    while len(wrong) < 4:
+        wrong.add(random.randint(2, 20))
+    wrong.discard(correct)
+    options = list(wrong) + [correct]
+    random.shuffle(options)
+    return a, b, correct, options
+
+@bot.message_handler(commands=['start'])
+def start_cmd(message):
+    # проверка, проходил ли уже капчу (по user_id в БД)
+    if is_verified(message.from_user.id):
+        show_main_menu(message.chat.id)
+        return
+
+    a, b, correct, options = generate_captcha()
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    buttons = []
+    for opt in options:
+        buttons.append(types.InlineKeyboardButton(
+            str(opt),
+            callback_data=f"cap:{correct}:{opt}"
+        ))
+    markup.add(*buttons)
+
+    bot.send_message(
+        message.chat.id,
+        f"🧮 Реши пример, чтобы продолжить:\n\n<b>{a} + {b} = ?</b>",
+        parse_mode='HTML',
+        reply_markup=markup
+    )
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('cap:'))
+def handle_captcha(call):
+    _, correct, chosen = call.data.split(':')
+    if int(chosen) == int(correct):
+        mark_verified(call.from_user.id)
+        bot.answer_callback_query(call.id, "✅ Верно!")
+        bot.edit_message_text(
+            "Капча пройдена. Добро пожаловать!",
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id
+        )
+        show_main_menu(call.message.chat.id)
+    else:
+        bot.answer_callback_query(call.id, "❌ Неверно, попробуй ещё раз", show_alert=True)
+Ключевой момент: callback_data не должен превышать 64 байта — cap:12:8 влезает спокойно.
+
+2. Модель розыгрыша (что хранить)
+В SQLite создаёшь таблицу giveaways:
+
+Поле	Тип	Пример
+id	INTEGER PK	1
+channel_id	TEXT	@my_channel
+prize	TEXT	«AirPods»
+winners_count	INTEGER	3
+conditions	TEXT	«Подписка + репост»
+end_at	DATETIME	2026-06-01 20:00
+status	TEXT	active / finished
+message_id	INTEGER	id поста в канале
+И таблицу participants:
+
+user_id	giveaway_id	joined_at
+3. Админ-панель: пошаговое создание розыгрыша
+Проще всего через register_next_step_handler (машина состояний на каждое сообщение админа).
+
+python
+# временное хранилище черновиков
+drafts = {}
+
+@bot.message_handler(commands=['admin'])
+def admin_panel(message):
+    if message.from_user.id not in ADMINS:
+        return
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("🎁 Создать розыгрыш", callback_data="create_giveaway"))
+    markup.add(types.InlineKeyboardButton("📊 Мои розыгрыши", callback_data="list_giveaways"))
+    bot.send_message(message.chat.id, "Админ-панель:", reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data == 'create_giveaway')
+def ask_prize(call):
+    drafts[call.from_user.id] = {}
+    msg = bot.send_message(call.message.chat.id, "Введи название приза:")
+    bot.register_next_step_handler(msg, ask_winners, call.from_user.id)
+
+def ask_winners(message, admin_id):
+    drafts[admin_id]['prize'] = message.text
+    msg = bot.send_message(message.chat.id, "Сколько победителей? (число)")
+    bot.register_next_step_handler(msg, ask_conditions, admin_id)
+
+def ask_conditions(message, admin_id):
+    drafts[admin_id]['winners'] = int(message.text)
+    msg = bot.send_message(message.chat.id, "Условия участия (текст для поста):")
+    bot.register_next_step_handler(msg, ask_end, admin_id)
+
+def ask_end(message, admin_id):
+    drafts[admin_id]['conditions'] = message.text
+    msg = bot.send_message(message.chat.id, "Когда итоги? Формат: 2026-06-01 20:00")
+    bot.register_next_step_handler(msg, publish_giveaway, admin_id)
+Дальше publish_giveaway собирает пост с кнопкой «Участвовать» и отправляет в канал через bot.send_message(channel_id, ..., reply_markup=markup). В callback_data кнопки кладёшь join:<giveaway_id>.
+
+4. Участие и случайный выбор победителей
+Кнопка «Участвовать» в канале:
+
+python
+@bot.callback_query_handler(func=lambda call: call.data.startswith('join:'))
+def join_giveaway(call):
+    giveaway_id = int(call.data.split(':')[1])
+    # проверка: капча пройдена? розыгрыш активен? уже участвует?
+    if not is_verified(call.from_user.id):
+        bot.answer_callback_query(call.id, "Сначала пройди капчу в боте", show_alert=True)
+        return
+    if already_joined(call.from_user.id, giveaway_id):
+        bot.answer_callback_query(call.id, "Ты уже участвуешь", show_alert=True)
+        return
+    add_participant(call.from_user.id, giveaway_id)
+    bot.answer_callback_query(call.id, "✅ Ты в списке участников!")
+Выбор победителей (по команде админа или по таймеру):
+
+python
+import random
+
+def pick_winners(giveaway_id):
+    participants = get_participants(giveaway_id)  # список user_id
+    winners_count = get_winners_count(giveaway_id)
+    if len(participants) <= winners_count:
+        return participants
+    return random.sample(participants, winners_count)
+Важно: random.sample без повторов — если нужно несколько разных победителей.
+
+5. Автоматическое подведение итогов
+Простой вариант: фоновый поток раз в минуту проверяет end_at <= now и status = 'active', выбирает победителей, публикует результат в канал, меняет статус на finished.
+
+python
+import threading, time
+from datetime import datetime
+
+def scheduler():
+    while True:
+        for g in get_active_giveaways():
+            if datetime.now() >= g.end_at:
+                winners = pick_winners(g.id)
+                text = "🎉 Итоги розыгрыша!\n\nПобедители:\n" + "\n".join(f"@{get_username(w)}" for w in winners)
+                bot.send_message(g.channel_id, text)
+                mark_finished(g.id)
+        time.sleep(60)
+Запускать через threading.Thread(target=scheduler, daemon=True).start().
+
+6. Что учесть, чтобы не сломалось
+bot.answer_callback_query обязателен на каждое нажатие кнопки, иначе у пользователя крутится спиннер .
+
+Капча должна быть один раз, а не при каждом /start. Храни verified в БД по user_id.
+
+Проверка подписки на канал (если условие «быть подписанным»): используй bot.get_chat_member(channel_id, user_id) перед добавлением в участники.
+
+Не храни состояние в памяти — при перезапуске всё потеряется. SQLite или JSON-файл.
+
+Callback data ≤ 64 байта — не пихай туда длинные тексты.
+
+Если хочешь, могу расписать конкретную библиотеку для работы с SQLite в этом боте или показать полный код одного файла с капчей + созданием розыгрыша + выбором победителей.
+
+капча ток когда первый раз заходишь в бота, ну крч, давай все сделаем чтоб было по красоте и аккуратно
+Found 14 web pages
+Понял: капча только при первом заходе в бота, дальше — чистая админка и участие. Ниже — аккуратная структура проекта, где всё разложено по полочкам: отдельный модуль капчи, отдельный модуль розыгрышей, SQLite для хранения, и всё это без дублирования логики.
+
+Сразу оговорюсь: в результатах поиска есть только разрозненные примеры по answer_callback_query, get_chat_member и инлайн-кнопкам, но готового «красивого» шаблона под такой бот нет. Поэтому собираем сами, но по-взрослому.
+
+Структура проекта
+text
+giveaway_bot/
+├── bot.py              # точка входа, регистрация хэндлеров
+├── config.py           # токен, ADMINS, CHANNEL_ID
+├── database.py         # SQLite: таблицы, запросы
+├── captcha.py          # генерация и проверка капчи (только 1 раз)
+├── admin.py            # создание розыгрыша через FSM
+├── giveaway.py         # участие, выбор победителей
+└── scheduler.py        # фоновое подведение итогов
+Главное правило: никакого хранения состояния в памяти. Всё, что нужно запомнить между сообщениями (черновик розыгрыша, факт прохождения капчи), — в SQLite или в словаре с TTL, но лучше в БД.
+
+1. Капча: один раз и навсегда
+В таблице users держим флаг verified:
+
+python
+# database.py
+import sqlite3
+
+conn = sqlite3.connect('bot.db', check_same_thread=False)
+cur = conn.cursor()
+
+cur.execute("""
+CREATE TABLE IF NOT EXISTS users (
+    user_id INTEGER PRIMARY KEY,
+    verified INTEGER DEFAULT 0,
+    username TEXT
+)
+""")
+conn.commit()
+
+def is_verified(user_id: int) -> bool:
+    cur.execute("SELECT verified FROM users WHERE user_id = ?", (user_id,))
+    row = cur.fetchone()
+    return bool(row and row[0])
+
+def mark_verified(user_id: int, username: str = ""):
+    cur.execute("""
+        INSERT INTO users (user_id, verified, username) VALUES (?, 1, ?)
+        ON CONFLICT(user_id) DO UPDATE SET verified = 1
+    """, (user_id, username))
+    conn.commit()
+Капча генерируется только если is_verified вернул False. После успешного ответа флаг ставится в 1, и больше пользователь её не увидит — даже если нажмёт /start повторно .
+
+python
+# captcha.py
+import random
+from telebot import types
+
+def generate():
+    a, b = random.randint(1, 10), random.randint(1, 10)
+    correct = a + b
+    wrong = set()
+    while len(wrong) < 3:
+        wrong.add(random.randint(2, 20))
+    wrong.discard(correct)
+    options = list(wrong) + [correct]
+    random.shuffle(options)
+    return a, b, correct, options
+
+def build_markup(correct, options):
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    buttons = [
+        types.InlineKeyboardButton(str(opt), callback_data=f"cap:{correct}:{opt}")
+        for opt in options
+    ]
+    markup.add(*buttons)
+    return markup
+Обработчик в bot.py:
+
+python
+@bot.message_handler(commands=['start'])
+def start(message):
+    if not is_verified(message.from_user.id):
+        a, b, correct, options = generate()
+        markup = build_markup(correct, options)
+        bot.send_message(
+            message.chat.id,
+            f"🧮 <b>Реши пример, чтобы продолжить:</b>\n\n{a} + {b} = ?",
+            parse_mode='HTML',
+            reply_markup=markup
+        )
+        return
+    # капча уже пройдена — показываем меню
+    show_main_menu(message.chat.id)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('cap:'))
+def check_captcha(call):
+    _, correct, chosen = call.data.split(':')
+    if int(chosen) == int(correct):
+        mark_verified(call.from_user.id, call.from_user.username or "")
+        bot.answer_callback_query(call.id, "✅ Верно!")
+        bot.edit_message_text(
+            "Капча пройдена. Добро пожаловать!",
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id
+        )
+        show_main_menu(call.message.chat.id)
+    else:
+        bot.answer_callback_query(call.id, "❌ Неверно, попробуй ещё раз", show_alert=True)
+callback_data вида cap:12:8 укладывается в лимит 64 байта без проблем.
+
+2. Схема БД для розыгрышей
+Две таблицы: giveaways и participants.
+
+python
+cur.executescript("""
+CREATE TABLE IF NOT EXISTS giveaways (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    channel_id TEXT NOT NULL,
+    message_id INTEGER,
+    prize TEXT NOT NULL,
+    winners_count INTEGER NOT NULL,
+    conditions TEXT,
+    end_at TEXT NOT NULL,
+    status TEXT DEFAULT 'active'
+);
+
+CREATE TABLE IF NOT EXISTS participants (
+    user_id INTEGER NOT NULL,
+    giveaway_id INTEGER NOT NULL,
+    joined_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, giveaway_id)
+);
+""")
+conn.commit()
+Поле status: active → finished. Фоновый поток ищет active с end_at <= now и закрывает их.
+
+3. Админ-панель: аккуратный FSM
+Вместо register_next_step_handler в перемешку с колбэками, делаем состояния в словаре (для черновика админа) и чистые переходы.
+
+python
+# admin.py
+import datetime
+
+drafts = {}  # { admin_id: {step, prize, winners, conditions, end_at} }
+
+def admin_menu(chat_id):
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("🎁 Создать розыгрыш", callback_data="gw:create"))
+    markup.add(types.InlineKeyboardButton("📊 Активные", callback_data="gw:list"))
+    bot.send_message(chat_id, "Админ-панель:", reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data == 'gw:create')
+def create_start(call):
+    if call.from_user.id not in ADMINS:
+        bot.answer_callback_query(call.id, "Нет доступа", show_alert=True)
+        return
+    drafts[call.from_user.id] = {'step': 'prize'}
+    bot.edit_message_text("Введи название приза:", call.message.chat.id, call.message.message_id)
+
+@bot.message_handler(func=lambda m: m.from_user.id in drafts and drafts[m.from_user.id]['step'] == 'prize')
+def step_prize(message):
+    drafts[message.from_user.id]['prize'] = message.text.strip()
+    drafts[message.from_user.id]['step'] = 'winners'
+    bot.send_message(message.chat.id, "Сколько победителей? (число)")
+
+@bot.message_handler(func=lambda m: m.from_user.id in drafts and drafts[m.from_user.id]['step'] == 'winners')
+def step_winners(message):
+    try:
+        n = int(message.text.strip())
+        assert n > 0
+    except:
+        bot.send_message(message.chat.id, "Нужно положительное число. Попробуй ещё:")
+        return
+    drafts[message.from_user.id]['winners'] = n
+    drafts[message.from_user.id]['step'] = 'conditions'
+    bot.send_message(message.chat.id, "Условия участия (текст для поста):")
+
+@bot.message_handler(func=lambda m: m.from_user.id in drafts and drafts[m.from_user.id]['step'] == 'conditions')
+def step_conditions(message):
+    drafts[message.from_user.id]['conditions'] = message.text.strip()
+    drafts[message.from_user.id]['step'] = 'end_at'
+    bot.send_message(message.chat.id, "Дата и время итогов (ГГГГ-ММ-ДД ЧЧ:ММ):")
+
+@bot.message_handler(func=lambda m: m.from_user.id in drafts and drafts[m.from_user.id]['step'] == 'end_at')
+def step_end_at(message):
+    try:
+        dt = datetime.datetime.strptime(message.text.strip(), "%Y-%m-%d %H:%M")
+    except ValueError:
+        bot.send_message(message.chat.id, "Формат неверный. Пример: 2026-06-01 20:00")
+        return
+
+    d = drafts.pop(message.from_user.id)
+    # публикуем пост в канал
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("🎉 Участвовать", callback_data=f"join:pending"))
+    text = (
+        f"🎁 <b>Розыгрыш: {d['prize']}</b>\n\n"
+        f"{d['conditions']}\n\n"
+        f"👥 Победителей: {d['winners']}\n"
+        f"⏰ Итоги: {dt.strftime('%d.%m.%Y %H:%M')}"
+    )
+    msg = bot.send_message(CHANNEL_ID, text, parse_mode='HTML', reply_markup=markup)
+
+    # сохраняем в БД и обновляем callback_data на реальный id
+    cur.execute(
+        "INSERT INTO giveaways (channel_id, message_id, prize, winners_count, conditions, end_at) VALUES (?,?,?,?,?,?)",
+        (CHANNEL_ID, msg.message_id, d['prize'], d['winners'], d['conditions'], dt.isoformat())
+    )
+    conn.commit()
+    gid = cur.lastrowid
+
+    # правим кнопку на join:gid
+    new_markup = types.InlineKeyboardMarkup()
+    new_markup.add(types.InlineKeyboardButton("🎉 Участвовать", callback_data=f"join:{gid}"))
+    bot.edit_message_reply_markup(CHANNEL_ID, msg.message_id, reply_markup=new_markup)
+
+    bot.send_message(message.chat.id, f"✅ Розыгрыш #{gid} опубликован.")
+Важный момент: кнопка «Участвовать» в канале должна иметь реальный id розыгрыша. Поэтому сначала отправляем с заглушкой, потом правим reply_markup через edit_message_reply_markup.
+
+4. Участие и выбор победителей
+python
+# giveaway.py
+import random
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('join:'))
+def join(call):
+    gid = int(call.data.split(':')[1])
+    uid = call.from_user.id
+
+    if not is_verified(uid):
+        bot.answer_callback_query(call.id, "Сначала пройди капчу в боте: /start", show_alert=True)
+        return
+
+    cur.execute("SELECT status FROM giveaways WHERE id = ?", (gid,))
+    row = cur.fetchone()
+    if not row or row[0] != 'active':
+        bot.answer_callback_query(call.id, "Розыгрыш уже завершён", show_alert=True)
+        return
+
+    cur.execute("SELECT 1 FROM participants WHERE user_id = ? AND giveaway_id = ?", (uid, gid))
+    if cur.fetchone():
+        bot.answer_callback_query(call.id, "Ты уже участвуешь", show_alert=True)
+        return
+
+    cur.execute("INSERT INTO participants (user_id, giveaway_id) VALUES (?,?)", (uid, gid))
+    conn.commit()
+    bot.answer_callback_query(call.id, "✅ Ты в списке участников!")
+
+
+def pick_winners(gid):
+    cur.execute("SELECT winners_count FROM giveaways WHERE id = ?", (gid,))
+    n = cur.fetchone()[0]
+    cur.execute("SELECT user_id FROM participants WHERE giveaway_id = ?", (gid,))
+    users = [r[0] for r in cur.fetchall()]
+    if len(users) <= n:
+        return users
+    return random.sample(users, n)  # без повторов
+random.sample даёт уникальных победителей — если нужно 3 разных человека, это правильный выбор.
+
+5. Фоновое подведение итогов
+python
+# scheduler.py
+import threading, time
+from datetime import datetime
+
+def scheduler_loop():
+    while True:
+        now = datetime.now().isoformat()
+        cur.execute(
+            "SELECT id, channel_id, message_id, winners_count FROM giveaways WHERE status='active' AND end_at <= ?",
+            (now,)
+        )
+        for gid, ch, mid, _ in cur.fetchall():
+            winners = pick_winners(gid)
+            if winners:
+                mentions = "\n".join(f"• <a href='tg://user?id={w}'>участник {w}</a>" for w in winners)
+                text = f"🎉 <b>Итоги розыгрыша #{gid}</b>\n\nПобедители:\n{mentions}"
+            else:
+                text = f"😔 Розыгрыш #{gid} завершён, но участников не было."
+            bot.send_message(ch, text, parse_mode='HTML', reply_to_message_id=mid)
+            cur.execute("UPDATE giveaways SET status='finished' WHERE id=?", (gid,))
+        conn.commit()
+        time.sleep(60)
+
+# в bot.py перед polling:
+threading.Thread(target=scheduler_loop, daemon=True).start()
+daemon=True — чтобы поток не мешал остановке бота.
+
+6. Мелочи для «красоты»
+Всегда отвечай на callback: bot.answer_callback_query(call.id) — иначе у пользователя крутится спиннер .
+
+Проверка подписки на канал (если условие «быть подписанным»): используй bot.get_chat_member(channel_id, user_id). Важно: в старых версиях telebot метод мог возвращать не то, что ожидаешь. Надёжнее проверять status not in ('left', 'kicked') .
+
+Не пихай в callback_data длинные строки — только join:123 или cap:12:8.
+
+parse_mode='HTML' для постов в канал — так проще с <b> и ссылками на профили.
+
+Капча один раз: проверка is_verified стоит первой строкой в /start, и после успеха флаг в БД больше не сбрасывается.
+
+Если хочешь, могу следующим сообщением выдать полный bot.py одним файлом (с капчей, админкой, участием и планировщиком), чтобы можно было скопировать и запустить, заменив только токен и CHANNEL_ID.
+
+крч, давай с тобой щас обсудим, создание розыгрыша поэтапно
+Давай разберём поэтапно. Я буду предлагать шаги, ты говоришь «ок» / «меняем» / «добавь ещё». В конце соберём финальную схему.
+
+Этап 1. Вход в создание
+Админ жмёт /admin → инлайн-кнопка «🎁 Создать розыгрыш».
+
+Вопрос к тебе: сразу начинаем спрашивать приз, или сначала показываем черновик-меню с кнопками «Изменить приз / победителей / условия / дату» и «Опубликовать»? Второй вариант удобнее, если админ ошибся на середине.
+
+Этап 2. Приз
+Бот: «Введи название приза».
+Принимаем текст, сохраняем в черновик.
+
+Вопрос: нужен ли ещё описание приза отдельным шагом (например, «AirPods Pro 2, цвет белый»), или хватит одного названия?
+
+Этап 3. Количество победителей
+Бот: «Сколько победителей? (число)».
+Валидация: целое > 0.
+
+Вопрос: ставим ли верхний лимит (например, не больше 50), чтобы не сломать выборку?
+
+Этап 4. Условия участия
+Бот: «Условия участия (текст для поста)».
+Свободный текст.
+
+Вопрос: нужны ли галочки-условия отдельно от текста? Например:
+
+☑ Подписка на канал
+□ Репост поста
+□ Быть подписанным на чат
+Если да — бот при участии будет реально проверять подписку через get_chat_member, а репост — нет (Telegram не даёт проверить репост надёжно).
+
+Этап 5. Дата и время итогов
+Бот: «Когда итоги? Формат ГГГГ-ММ-ДД ЧЧ:ММ».
+Валидация через strptime. Проверка, что дата в будущем.
+
+Вопрос: нужен ли ещё часовой пояс явно (например, «МСК»), или считаем, что сервер в нужном поясе?
+
+Этап 6. Канал публикации
+Вопрос: розыгрыш всегда публикуется в один фиксированный CHANNEL_ID из конфига, или админ выбирает канал из списка (если бот добавлен в несколько)?
+
+Этап 7. Предпросмотр
+Перед публикацией показываем админу, как будет выглядеть пост:
+
+text
+🎁 Розыгрыш: AirPods Pro 2
+
+Условия: подписка + репост
+👥 Победителей: 3
+⏰ Итоги: 01.06.2026 20:00
+
+[🎉 Участвовать]
+И кнопки: «✅ Опубликовать» / «✏️ Изменить» / «❌ Отмена».
+
+Вопрос: оставляем предпросмотр или публикуем сразу после ввода даты?
+
+Этап 8. Публикация
+Отправляем пост в канал, сохраняем message_id и giveaway_id, правим кнопку с join:pending на join:<id> через edit_message_reply_markup.
+
+Этап 9. Что дальше с розыгрышем
+Вопрос: после публикации админу нужны кнопки управления этим розыгрышем?
+
+«📊 Статистика» (сколько участников)
+
+«🛑 Завершить досрочно»
+
+«🗑 Удалить»
+
+«🔔 Напомнить в канал»
+
+Или пока хватит только авто-завершения по таймеру?
+
+Ответь по пунктам (можно коротко: «1 — второй вариант, 2 — одно название, 3 — лимит 100, ...»), и я соберу финальную поэтапную схему с учётом твоих ответов.
+
+текст и фото можно, ну типа там будут розыгрыши нфт подарков, обычных подарков за звезды и может просто звезды
+Понял: приз — это текст + опционально фото, и типы розыгрышей разные (NFT-подарки, подарки за звёзды, просто звёзды). Давай тогда пересоберём этапы с учётом этого.
+
+Этап 1. Вход в создание
+/admin → «🎁 Создать розыгрыш».
+
+Сразу спрашиваем тип розыгрыша (это влияет на шаблон поста и подсказки):
+
+text
+Что разыгрываем?
+[🖼 NFT-подарок]  [🎁 Подарок за звёзды]
+[⭐ Звёзды]       [📦 Другое]
+Вопрос: тип нужен только для красивого шаблона текста, или ещё и для логики (например, для «звёзд» — автоматическая выдача через sendGift/refundStarPayment)? Пока предлагаю только шаблон, выдачу делаешь вручную.
+
+Этап 2. Приз: текст
+Бот: «Введи название/описание приза».
+Свободный текст, сохраняем в черновик.
+
+Для разных типов можно подставлять пример-подсказку:
+
+NFT: «Например: NFT-подарок „Роза“ из коллекции X»
+
+За звёзды: «Например: подарок „Медведь“ за 50 ⭐»
+
+Звёзды: «Например: 100 ⭐ на твой аккаунт»
+
+Этап 3. Приз: фото (опционально)
+Бот: «Пришли фото приза или напиши /skip».
+
+Если фото прислано — берём message.photo[-1].file_id (самый большой размер), сохраняем в черновик.
+
+Вопрос: одно фото или альбом (несколько)? Альбом в Telegram отправляется через send_media_group, и к нему нельзя прикрепить инлайн-кнопку — кнопку «Участвовать» придётся слать отдельным сообщением. Если альбом не нужен — одно фото и кнопка в одном посте, это чище.
+
+Этап 4. Количество победителей
+Бот: «Сколько победителей? (число)».
+Валидация: целое, 1–100.
+
+Этап 5. Условия участия
+Бот: «Условия участия (текст для поста)».
+Свободный текст.
+
+Плюс, как обсуждали, можно галочки:
+
+text
+[✅] Подписка на канал (проверяется)
+[ ] Репост (не проверяется)
+Вопрос: оставляем галочку «подписка» с реальной проверкой через get_chat_member, или пока только текст?
+
+Этап 6. Дата и время итогов
+Формат ГГГГ-ММ-ДД ЧЧ:ММ, проверка что в будущем.
+
+Вопрос: пояс указываем явно («МСК») или сервер = нужный пояс?
+
+Этап 7. Канал публикации
+Вопрос: фиксированный CHANNEL_ID из конфига или выбор из списка?
+
+Этап 8. Предпросмотр
+Показываем админу ровно то, что уйдёт в канал: фото + текст + кнопка. Кнопки:
+«✅ Опубликовать» / «✏️ Изменить» / «❌ Отмена».
+
+Вопрос: оставляем предпросмотр? Я за — с фото и разными типами призов ошибок будет больше.
+
+Этап 9. Публикация
+Отправляем в канал:
+
+если есть фото → send_photo(channel, photo=file_id, caption=text, reply_markup=join_markup)
+
+если нет → send_message(channel, text=text, reply_markup=join_markup)
+
+Заглушка join:pending → правим на join:<id> через edit_message_reply_markup.
+
+Этап 10. Управление после публикации
+Кнопки админу в личке:
+
+«📊 Статистика» (участников)
+
+«🛑 Завершить досрочно»
+
+«🔔 Напомнить в канал»
+
+«🗑 Удалить»
+
+Вопрос: что из этого нужно, а что лишнее?
+
+Ответь по пунктам (коротко), и я соберу финальную схему + структуру черновика (какие поля храним) и покажу, как будет выглядеть пост для каждого типа приза.
+
+стоп, нет, крч, создать розыгрыш, введите приз - туда можно вставить ссылку на подарок, название, колво звезд и тд, так же можно и вставить фото, дальше, кол во победителей, потом условия "подписка на канал" "пригласить друзей" "нет", подписка на канал можно выбрать несколько каналов, пригласить друзей - нужно указать сколько, нет - просто нет условий, дата оставим, прдепросмотр да, кайф
+Понял, фиксирую. Давай соберу как ты сказал, аккуратно и по шагам.
+
+Финальная схема создания розыгрыша
+Шаг 1. Вход
+/admin → «🎁 Создать розыгрыш». Создаётся черновик в БД со статусом draft.
+
+Шаг 2. Приз (текст + опционально фото)
+Бот: «Введи приз: ссылку на подарок, название, количество звёзд и т.д.»
+
+Свободный текст. Сохраняем в draft.prize_text.
+
+Затем: «Пришли фото приза или /skip».
+
+Фото → берём message.photo[-1].file_id → draft.prize_photo
+
+/skip → prize_photo = NULL
+
+Важно: если фото есть — пост уйдёт через send_photo с caption=текст и кнопкой. Если нет — send_message. Оба варианта поддерживают инлайн-кнопку.
+
+Ограничение: caption у фото — максимум 1024 символа. Если текст длиннее — придётся резать или отправлять фото и текст отдельными сообщениями. Учти это, когда будешь писать длинные описания приза.
+
+Шаг 3. Количество победителей
+Бот: «Сколько победителей? (число)».
+Валидация: целое, 1–100. → draft.winners_count
+
+Шаг 4. Условия участия
+Бот показывает инлайн-меню с мультивыбором:
+
+text
+[✅ Подписка на канал]   [⬜ Пригласить друзей]
+[⬜ Нет условий]         [➡️ Далее]
+Логика:
+
+«Подписка на канал» — можно выбрать несколько каналов. После нажатия бот просит: «Пришли @username каналов через запятую или по одному». Сохраняем список draft.required_channels = ['@ch1', '@ch2']. При участии проверяем get_chat_member по каждому.
+
+«Пригласить друзей» — бот спрашивает: «Сколько друзей нужно пригласить? (число)». → draft.invite_count = N. Механика: каждому участнику выдаём персональную ссылку https://t.me/<bot>?start=ref_<user_id>_<giveaway_id>, при /start с таким параметром засчитываем реферал. Нюанс: Telegram не даёт проверить, что приглашённый — реально новый пользователь, а не второй аккаунт. Обычно засчитывают только тех, кто прошёл капчу и подписался на каналы. Это надо явно прописать в правилах.
+
+«Нет условий» — сбрасывает остальные, draft.conditions_type = 'none'.
+
+«Далее» — переход к шагу 5.
+
+Вопрос к тебе: «Подписка» и «Пригласить друзей» могут быть вместе (подписка + N друзей), или это взаимоисключающие варианты? Я бы сделал «можно вместе», но подтверди.
+
+Шаг 5. Дата и время итогов
+Формат ГГГГ-ММ-ДД ЧЧ:ММ, проверка что в будущем. → draft.end_at
+
+Шаг 6. Предпросмотр
+Показываем админу ровно то, что уйдёт в канал:
+
+если есть фото → send_photo с caption и кнопкой «🎉 Участвовать»
+
+если нет → send_message
+
+Кнопки под предпросмотром (в личке админа, отдельным сообщением):
+«✅ Опубликовать» / «✏️ Изменить» / «❌ Отмена»
+
+«✏️ Изменить» → меню: какой шаг переписать (приз / фото / победители / условия / дата).
+
+Шаг 7. Публикация
+send_photo / send_message в канал с join:pending
+
+сохраняем message_id
+
+edit_message_reply_markup → join:<giveaway_id>
+
+draft.status = 'active'
+
+Структура черновика (что храним в БД)
+Таблица giveaways (одна и для драфтов, и для активных):
+
+Поле	Тип	Примечание
+id	INTEGER PK	
+status	TEXT	draft / active / finished
+prize_text	TEXT	ссылка/название/звёзды
+prize_photo	TEXT NULL	file_id
+winners_count	INTEGER	
+conditions_type	TEXT	none / subscribe / invite / both
+required_channels	TEXT	JSON-список ["@ch1","@ch2"]
+invite_count	INTEGER NULL	сколько друзей
+end_at	TEXT	ISO
+channel_id	TEXT	куда публикуем
+message_id	INTEGER NULL	id поста в канале
+Плюс таблицы:
+
+participants (user_id, giveaway_id, joined_at)
+
+referrals (inviter_id, invited_id, giveaway_id) — для учёта приглашённых
+
+users (user_id, verified) — капча
+
+Как будет выглядеть пост (примеры)
+NFT-подарок с фото:
+
+text
+🖼 [фото подарка]
+🎁 Розыгрыш: NFT «Роза» из коллекции X
+🔗 https://t.me/nft/...
+
+Условия:
+• Подписка: @channel1, @channel2
+• Пригласить друзей: 3
+
+👥 Победителей: 1
+⏰ Итоги: 01.06.2026 20:00
+
+[🎉 Участвовать]
+Звёзды без фото:
+
+text
+⭐ Розыгрыш: 100 звёзд на аккаунт
+
+Условия: подписка на @channel1
+👥 Победителей: 3
+⏰ Итоги: 01.06.2026 20:00
+
+[🎉 Участвовать]
+Подтверди два момента, и я зафиксирую схему окончательно:
+
+«Подписка» + «Пригласить друзей» могут быть вместе? (я за «да»)
+
+Приглашённые друзья засчитываются только после прохождения капчи и подписки на каналы? (иначе накрутка вторыми аккаунтами)
+
+друзей пригласить надо в канал, надо чтобы бот регал каждую ссылку для каждого участника персонально
+Found 8 web pages
+Понял, ключевое изменение: друзей нужно приглашать именно в канал, и для каждого участника нужна персональная ссылка. Это меняет механику — вместо реферальных ?start=ref_... ссылок на бота, используем createChatInviteLink с уникальным лимитом и меткой.
+
+Разберу, как это сделать правильно в pyTelegramBotAPI.
+
+Что даёт Telegram для персональных ссылок
+Метод bot.create_chat_invite_link() создаёт дополнительную ссылку на чат/канал. Ключевые параметры :
+
+chat_id — канал, куда приглашаем
+
+name — имя ссылки (до 32 символов), можно использовать для метки «кто пригласил»
+
+member_limit — максимум участников, которые могут войти по этой ссылке (1–99999)
+
+expire_date — когда ссылка протухнет (Unix timestamp)
+
+Важно: бот должен быть администратором канала с правом приглашать пользователей .
+
+Схема с персональными ссылками
+Как засчитывать приглашения
+Проблема: Telegram не присылает боту событие «пользователь X вошёл в канал по ссылке Y». Бот видит только new_chat_members в группах, но для каналов это событие не приходит в том же виде.
+
+Поэтому есть два рабочих подхода:
+
+Вариант А. member_limit = 1 + проверка через get_chat_member
+Участник жмёт «Пригласить друзей» в боте.
+
+Бот создаёт ссылку: create_chat_invite_link(channel_id, member_limit=1, name=f"ref_{user_id}_{giveaway_id}").
+
+Участник кидает ссылку другу.
+
+Друг переходит по ссылке и вступает в канал — ссылка «сгорает» (лимит 1).
+
+Бот не получает уведомление о вступлении. Как узнать, что друг зашёл?
+
+Решение: периодически проверять, «сгорела» ли ссылка. Но Telegram не даёт API «проверить, использована ли ссылка». Есть обходной путь: после создания ссылки с member_limit=1, бот может попытаться отозвать её (revoke_chat_invite_link). Если ссылка уже использована — отзыв вернёт ошибку или ссылка уже неактивна. Это ненадёжно.
+
+Более надёжно: при создании ссылки сохранять invite_link в БД. Когда друг заходит в бота (а он должен зайти, чтобы проверить условия или забрать приз), бот просит его нажать /start. В этот момент бот может проверить через get_chat_member(channel_id, friend_id), подписан ли друг на канал. Но как связать «друг пришёл по ссылке участника X»? Никак — Telegram не передаёт эту информацию.
+
+Вариант Б. Ссылка на бота + проверка подписки (рекомендую)
+Раз Telegram не даёт отследить «кто кого пригласил в канал», используем ссылку на бота с параметром, а подписку на канал проверяем отдельно.
+
+Участник жмёт «Пригласить друзей» → бот генерирует ссылку:
+https://t.me/<bot_username>?start=ref_<user_id>_<giveaway_id>
+
+Друг переходит по ссылке → бот получает /start ref_<user_id>_<giveaway_id> → записывает в БД: invited_id = друг, inviter_id = user_id.
+
+Бот говорит другу: «Чтобы засчитать приглашение, подпишись на канал @xxx».
+
+Друг подписывается → бот проверяет get_chat_member(channel_id, friend_id) → если подписан, засчитывает приглашение участнику.
+
+Плюс: ты точно знаешь, кто кого привёл, и можешь требовать подписку.
+Минус: друг должен зайти в бота и нажать /start, а не просто вступить в канал по ссылке. Но для розыгрышей это нормально — участники и так проходят через бота.
+
+Что я рекомендую для твоего бота
+Использовать Вариант Б, потому что:
+
+Telegram не даёт надёжного способа отследить вступление в канал по конкретной ссылке.
+
+createChatInviteLink с member_limit=1 создаёт ссылку, но бот не узнает, что она использована .
+
+Ссылка на бота с ?start=ref_... — стандартный и надёжный паттерн для реферальных механик в Telegram.
+
+Но если ты хочешь, чтобы друг вступал именно в канал по ссылке, а не в бота, можно сделать комбинированно:
+
+Бот создаёт персональную ссылку в канал: create_chat_invite_link(channel_id, member_limit=1, name=f"ref_{user_id}").
+
+Бот отправляет участнику эту ссылку + инструкцию: «Перешли другу. Он должен зайти в канал и написать боту /start ref_<user_id>».
+
+Друг заходит в канал по ссылке (лимит 1 сгорает) и обязательно пишет боту /start ref_<user_id>.
+
+Бот проверяет get_chat_member(channel_id, friend_id) → если подписан, засчитывает.
+
+Так ты и ссылку в канал даёшь (красиво), и отслеживаешь приглашение (через бота).
+
+Что меняется в структуре БД
+Добавляем таблицу referrals:
+
+sql
+CREATE TABLE IF NOT EXISTS referrals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    giveaway_id INTEGER NOT NULL,
+    inviter_id INTEGER NOT NULL,
+    invited_id INTEGER NOT NULL,
+    invite_link TEXT,           -- персональная ссылка в канал
+    status TEXT DEFAULT 'pending',  -- pending / confirmed
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(giveaway_id, invited_id)  -- один друг = одно засчитанное приглашение
+);
+И поле в giveaways:
+
+invite_target — куда приглашаем: channel (сейчас) или bot (если передумаешь)
+
+Код: генерация персональной ссылки
+python
+import time
+from datetime import datetime, timedelta
+
+def create_personal_invite(bot, channel_id, inviter_id, giveaway_id):
+    """Создаёт персональную ссылку в канал с лимитом 1."""
+    try:
+        invite = bot.create_chat_invite_link(
+            chat_id=channel_id,
+            name=f"ref_{inviter_id}_{giveaway_id}"[:32],  # лимит 32 символа
+            member_limit=1,
+            expire_date=int((datetime.now() + timedelta(days=7)).timestamp())
+        )
+        # сохраняем в БД
+        cur.execute(
+            "INSERT INTO referrals (giveaway_id, inviter_id, invite_link) VALUES (?,?,?)",
+            (giveaway_id, inviter_id, invite.invite_link)
+        )
+        conn.commit()
+        return invite.invite_link
+    except Exception as e:
+        # бот не админ / нет прав
+        return None
+Важно: name — до 32 символов . Метка ref_<user_id>_<giveaway_id> может не влезть, если id длинные. Обрезай или используй хэш.
+
+Что показать участнику
+text
+🎉 Твоя персональная ссылка для приглашения:
+
+https://t.me/+AbCdEfGhIjK
+
+📌 Как засчитать друга:
+1. Перешли ему эту ссылку
+2. Друг должен зайти в канал и написать боту /start ref_12345
+3. После проверки подписки приглашение засчитается
+
+⏳ Ссылка действует 7 дней и работает только для ОДНОГО человека.
+Итог: что подтвердить
+Друг заходит в канал по ссылке (лимит 1) — да?
+
+Друг обязательно пишет боту /start ref_<id> — да? (иначе приглашение не засчитать)
+
+Засчитываем только после проверки подписки на канал — да?
+
+Если всё «да» — я обновлю финальную схему с учётом referrals и покажу, как это встроится в шаги создания розыгрыша (на шаге «Условия» → «Пригласить друзей» → N).
+
+если создать ссылку в канале видно же сколько участников перешло по ней
+Found 10 web pages
+Да, ты прав. В Telegram есть поле usage (сколько пользователей присоединилось по ссылке), но стандартный Bot API (pyTelegramBotAPI) не отдаёт его напрямую при вызове createChatInviteLink или getChatInviteLink.
+
+Что это значит на практике
+В官方 документации Telegram (MTProto/TDLib) у объекта chatInviteExported действительно есть поле usage — «How many users joined using this link» . Но это уровень клиентского API, а не Bot API.
+
+В Bot API метод createChatInviteLink возвращает объект ChatInviteLink, и в нём нет поля usage — только сама ссылка, лимит и дата истечения.
+
+Как всё-таки узнать количество
+Есть обходные пути, но они зависят от библиотеки:
+
+Pyrogram имеет метод get_chat_invite_link_joiners_count(chat_id, invite_link), который возвращает число вступивших . Но это не pyTelegramBotAPI.
+
+telectron (форк Pyrogram) тоже имеет такой метод .
+
+Через raw MTProto (Telethon/Pyrogram) можно запросить messages.exportChatInvite и получить usage , но это уже не Bot API.
+
+Что делать в твоём случае
+Если ты используешь pyTelegramBotAPI (telebot), прямого способа получить usage нет. Варианты:
+
+Вариант 1 (простой): продолжать использовать схему с /start ref_<id>, которую мы обсуждали. Ты точно знаешь, кто кого пригласил, и не зависишь от того, отдаёт ли Bot API счётчик.
+
+Вариант 2 (если критично видеть счётчик): перейти на Pyrogram или Telethon для этого бота — там есть доступ к usage через get_chat_invite_link_joiners_count или raw-запросы. Но это переписывание всей логики.
+
+Вариант 3 (гибрид): оставить telebot для бота, но для проверки ссылок использовать отдельный клиент на Pyrogram/Telethon (нужен api_id/api_hash от my.telegram.org). Сложнее в поддержке.
+
+Мой совет
+Если ты хочешь, чтобы каждый участник видел, сколько друзей уже засчитано, и при этом остаёшься на telebot — схема с /start ref_ остаётся самой надёжной. Счётчик usage в Bot API недоступен, а городить второй клиент ради одного поля — оверхед.
+
+Если же ты готов сменить библиотеку на Pyrogram — тогда можно показывать и usage, и всё остальное будет чище. Скажи, какой путь выбираешь, и я адаптирую схему под него.
+
+у меня идея, давай сделаем в боте просто реф ссылку, но для того чтобы можно было использовать ее надо пройти капчу, а после подписаться на каналы (если есть условия)
+Отличная идея — и она как раз решает проблему, которую мы обсуждали: раз Bot API не отдаёт usage у ссылок, ты сам контролируешь засчитывание через прохождение капчи и подписку. Давай зафиксирую механику.
+
+Логика реферальной ссылки
+Реф-ссылка ведёт в бота, а не в канал:
+
+text
+https://t.me/<bot_username>?start=ref_<inviter_id>_<giveaway_id>
+Друг переходит → бот получает /start ref_123_5 → приглашение ещё не засчитано, а только «заявка».
+
+Дальше друг должен:
+
+Пройти капчу (если ещё не проходил).
+
+Подписаться на каналы из условий розыгрыша (если они есть).
+
+Нажать кнопку «✅ Я выполнил условия» (или бот сам проверит через get_chat_member).
+
+Только после этого приглашение засчитывается пригласившему.
+
+Почему это правильно
+Ты не зависишь от usage у invite-ссылок — Bot API его всё равно не отдаёт.
+
+Друг обязан зайти в бота, а значит ты точно знаешь, кто пришёл и по чьей ссылке.
+
+Капча отсекает ботов и вторые аккаунты на этапе входа.
+
+Подписка проверяется через get_chat_member — реально, а не «на слово».
+
+Как это выглядит для друга
+Перешёл по ?start=ref_123_5
+
+Бот: «🧮 Реши пример, чтобы продолжить» (если капча не пройдена)
+
+После капчи: «Чтобы засчитать приглашение, подпишись на: @ch1, @ch2» + кнопка «✅ Проверить подписку»
+
+Бот проверяет get_chat_member по каждому каналу:
+
+все ок → referrals.status = 'confirmed', пригласившему +1
+
+не все → «Ты не подписан на @ch2, подпишись и нажми ещё раз»
+
+Что меняется в БД
+Таблица referrals (как обсуждали):
+
+sql
+CREATE TABLE IF NOT EXISTS referrals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    giveaway_id INTEGER NOT NULL,
+    inviter_id INTEGER NOT NULL,
+    invited_id INTEGER NOT NULL,
+    status TEXT DEFAULT 'pending',  -- pending / confirmed / rejected
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    confirmed_at TEXT,
+    UNIQUE(giveaway_id, invited_id)  -- один друг = одно засчитанное приглашение
+);
+Важно: UNIQUE(giveaway_id, invited_id) не даёт одному и тому же другу засчитаться дважды в одном розыгрыше — даже если он перейдёт по ссылке другого участника.
+
+Код: обработка /start ref_...
+python
+@bot.message_handler(commands=['start'])
+def start(message):
+    uid = message.from_user.id
+    args = message.text.split(maxsplit=1)
+    payload = args[1] if len(args) > 1 else None
+
+    # 1. Реф-переход
+    if payload and payload.startswith('ref_'):
+        try:
+            _, inviter_id, giveaway_id = payload.split('_')
+            inviter_id, giveaway_id = int(inviter_id), int(giveaway_id)
+            # защита от саморефера
+            if inviter_id != uid:
+                cur.execute(
+                    "INSERT OR IGNORE INTO referrals (giveaway_id, inviter_id, invited_id) VALUES (?,?,?)",
+                    (giveaway_id, inviter_id, uid)
+                )
+                conn.commit()
+        except ValueError:
+            pass
+
+    # 2. Капча (только если не проходил)
+    if not is_verified(uid):
+        send_captcha(message.chat.id)
+        return
+
+    # 3. Если есть pending-реферал — проверяем подписку
+    pending = get_pending_referral(uid)
+    if pending:
+        check_and_confirm_referral(message.chat.id, uid, pending)
+        return
+
+    show_main_menu(message.chat.id)
+Код: проверка подписки и засчитывание
+python
+def check_and_confirm_referral(chat_id, uid, pending):
+    giveaway_id = pending['giveaway_id']
+    channels = get_required_channels(giveaway_id)  # список @username
+
+    if not channels:
+        # условий нет — сразу засчитываем
+        confirm_referral(pending['id'])
+        bot.send_message(chat_id, "✅ Приглашение засчитано!")
+        return
+
+    not_subbed = []
+    for ch in channels:
+        try:
+            member = bot.get_chat_member(ch, uid)
+            if member.status in ('left', 'kicked'):
+                not_subbed.append(ch)
+        except Exception:
+            not_subbed.append(ch)
+
+    if not_subbed:
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("✅ Проверить подписку", callback_data=f"checkref:{pending['id']}"))
+        bot.send_message(
+            chat_id,
+            "Чтобы засчитать приглашение, подпишись на:\n" + "\n".join(not_subbed),
+            reply_markup=markup
+        )
+    else:
+        confirm_referral(pending['id'])
+        bot.send_message(chat_id, "✅ Подписка подтверждена, приглашение засчитано!")
+Что показывать пригласившему
+В личном меню участника — блок «Мои приглашения»:
+
+text
+🎉 Розыгрыш #5
+Твоя ссылка: https://t.me/bot?start=ref_123_5
+Приглашено: 2 / 3
+[📋 Скопировать ссылку]
+Счётчик берётся из referrals WHERE inviter_id=123 AND giveaway_id=5 AND status='confirmed'.
+
+Один нюанс, который надо решить
+Друг перешёл по ссылке, но капчу не прошёл — приглашение висит в pending. Если он так и не пройдёт капчу до дедлайна, приглашение не засчитается. Это правильно? Я думаю да — иначе накрутка вторыми аккаунтами без капчи.
+
+Ещё нюанс: если друг уже участвовал в этом розыгрыше раньше (переходил по другой ссылке), UNIQUE(giveaway_id, invited_id) не даст засчитать его второй раз. Первый пригласивший получает зачёт.
+
+Подтверди два момента, и я обновлю финальную схему:
+
+Реф-ссылка ведёт в бота (не в канал) — ок?
+
+Засчитываем только после капчи + подписки — ок?
+
+Если да — покажу, как это встроится в шаги создания розыгрыша (на шаге «Условия» → «Пригласить друзей» → N) и как будет выглядеть блок «Мои приглашения» в меню участника.
+
+а как сделать чтобы люди приглашали новых друзей, мб сделать условия чтоб были люди которые не участвовали ранее в конкурсах
+Found 6 web pages
+Идея правильная, и её можно реализовать без внешних сервисов — всё в твоей БД. Ключевой момент: «новый друг» = пользователь, которого бот раньше не видел (или который не участвовал ни в одном розыгрыше). Это проверяется по таблице users / participants.
+
+Разберу, как это встроить в логику, которую мы уже обсуждали.
+
+Как определить «нового» пользователя
+У тебя уже есть таблица users (с капчей). Добавляем туда поле first_seen_at (или используем факт наличия записи). Логика простая:
+
+Друг переходит по реф-ссылке → бот получает /start ref_...
+
+Бот проверяет: есть ли invited_id в таблице users?
+
+Нет → это новый пользователь. Создаём запись, засчитываем приглашение (после капчи + подписки).
+
+Есть → пользователь уже заходил в бота раньше. Приглашение не засчитываем (или засчитываем, но с пометкой «не новый» — по твоему выбору).
+
+Это решает проблему «накрутки»: старый участник не может засчитаться как приглашённый у другого.
+
+Что добавить в БД
+В таблицу users:
+
+sql
+ALTER TABLE users ADD COLUMN first_seen_at TEXT DEFAULT CURRENT_TIMESTAMP;
+Или просто проверять SELECT 1 FROM users WHERE user_id = ? — если строка есть, значит пользователь уже был.
+
+В таблицу referrals добавляем флаг:
+
+sql
+ALTER TABLE referrals ADD COLUMN is_new_user INTEGER DEFAULT 0;
+is_new_user = 1 — засчитан как новый друг. 0 — старый пользователь (не засчитывается или засчитывается с ограничением).
+
+Код проверки при /start ref_...
+python
+@bot.message_handler(commands=['start'])
+def start(message):
+    uid = message.from_user.id
+    args = message.text.split(maxsplit=1)
+    payload = args[1] if len(args) > 1 else None
+
+    # проверяем, новый ли пользователь (до создания записи!)
+    is_new = not user_exists(uid)
+
+    # создаём/обновляем запись пользователя
+    ensure_user(uid, message.from_user.username or "")
+
+    if payload and payload.startswith('ref_'):
+        try:
+            _, inviter_id, giveaway_id = payload.split('_')
+            inviter_id, giveaway_id = int(inviter_id), int(giveaway_id)
+
+            if inviter_id == uid:
+                bot.send_message(message.chat.id, "Нельзя пригласить самого себя.")
+            elif not is_new:
+                bot.send_message(
+                    message.chat.id,
+                    "Ты уже зарегистрирован в боте раньше — приглашение не будет засчитано как «новый друг»."
+                )
+            else:
+                # сохраняем реферал со статусом pending + is_new_user=1
+                cur.execute(
+                    "INSERT OR IGNORE INTO referrals (giveaway_id, inviter_id, invited_id, is_new_user) VALUES (?,?,?,1)",
+                    (giveaway_id, inviter_id, uid)
+                )
+                conn.commit()
+        except ValueError:
+            pass
+
+    # дальше — капча / подписка / меню
+    ...
+Важно: is_new вычисляется до ensure_user(), иначе пользователь уже будет в БД и всегда окажется «старым».
+
+Что показывать пригласившему
+В блоке «Мои приглашения» добавить разбивку:
+
+text
+🎉 Розыгрыш #5
+Твоя ссылка: https://t.me/bot?start=ref_123_5
+Приглашено новых: 2 / 3
+(ещё 1 перешёл, но уже был в боте — не засчитан)
+Счётчик засчитано берётся из:
+
+sql
+SELECT COUNT(*) FROM referrals 
+WHERE inviter_id = ? AND giveaway_id = ? 
+  AND status = 'confirmed' AND is_new_user = 1
+Нюанс с капчей
+Если пользователь новый, но капчу не прошёл — приглашение висит в pending и не засчитывается. Это правильно: иначе можно нагнать ботов, которые просто перешли по ссылке.
+
+Если пользователь старый (уже проходил капчу) — приглашение не засчитывается вообще, даже если он подпишется. Это отсекает «вторые аккаунты» только частично (второй аккаунт для бота всё равно новый), но основную массу накрутки убирает.
+
+Альтернатива: «не участвовал ранее в конкурсах»
+Если хочешь строже — засчитывать только тех, кто не участвовал ни в одном розыгрыше (не просто не заходил в бота):
+
+python
+def has_participated_before(uid):
+    cur.execute("SELECT 1 FROM participants WHERE user_id = ? LIMIT 1", (uid,))
+    return cur.fetchone() is not None
+Тогда «новый друг» = пользователь, которого нет в participants. Это жёстче, но честнее для серии розыгрышей: человек, который уже участвовал в прошлом конкурсе, не может быть «приглашённым новичком».
+
+Вопрос к тебе: какой критерий выбираем?
+
+«Не заходил в бота раньше» — мягче, проще накрутить вторым аккаунтом.
+
+«Не участвовал ни в одном розыгрыше» — жёстче, но честнее.
+
+Я бы рекомендовал вариант 2 для розыгрышей с призами — он лучше защищает от «профессиональных участников».
+
+опиши поэтапно работу бота
+Опишу полную работу бота поэтапно — от первого захода пользователя до подведения итогов. Разделю на три роли: участник, приглашённый друг, админ.
+
+Роль 1. Участник (обычный пользователь)
+Этап 1. Первый заход в бота
+Пользователь открывает бота → /start.
+
+Бот проверяет: есть ли user_id в таблице users?
+
+Нет → создаёт запись, verified = 0, показывает капчу.
+
+Есть, но verified = 0 → снова капча.
+
+Есть, verified = 1 → сразу главное меню.
+
+Этап 2. Капча
+Бот генерирует пример a + b, правильный ответ и 3 неверных.
+
+Показывает: 🧮 Реши пример: 7 + 5 = ? + 4 инлайн-кнопки.
+
+Пользователь жмёт кнопку:
+
+Верно → verified = 1, бот: «Капча пройдена» → главное меню.
+
+Неверно → answer_callback_query с ошибкой, пример остаётся (можно жать снова).
+
+Капча показывается только один раз — при следующих /start её не будет.
+
+Этап 3. Главное меню
+text
+👋 Привет! Ты в боте розыгрышей.
+
+[🎁 Активные розыгрыши]
+[🏆 Мои приглашения]
+[📊 Мои участия]
+Этап 4. Просмотр активных розыгрышей
+Бот выбирает из БД все giveaways со status = 'active'.
+
+Показывает список кнопками: 🎁 Розыгрыш #5: NFT «Роза» и т.д.
+
+По нажатию — показывает пост (фото + текст + условия + дата) и кнопку «🎉 Участвовать».
+
+Этап 5. Участие в розыгрыше
+Пользователь жмёт «🎉 Участвовать».
+
+Бот проверяет по очереди:
+
+Капча пройдена? → если нет, «Сначала пройди капчу: /start».
+
+Розыгрыш активен? → если нет, «Розыгрыш завершён».
+
+Уже участвует? → если да, «Ты уже в списке».
+
+Условия выполнены?
+
+Подписка на каналы → get_chat_member по каждому. Если не подписан — показывает список каналов + кнопку «✅ Проверить подписку».
+
+Пригласить N друзей → проверяет COUNT(referrals WHERE inviter_id=... AND status='confirmed' AND is_new_user=1) >= N. Если меньше — «Ты пригласил X из N, вот твоя ссылка».
+
+Нет условий → сразу засчитывает.
+
+Если всё ок → INSERT INTO participants, бот: «✅ Ты участвуешь!».
+
+Этап 6. «Мои приглашения»
+Бот показывает список розыгрышей, где есть условие «пригласить друзей».
+
+Для каждого:
+
+text
+🎉 Розыгрыш #5
+Твоя ссылка: https://t.me/bot?start=ref_123_5
+Приглашено новых: 2 / 3
+[📋 Скопировать ссылку]
+Счётчик = confirmed + is_new_user = 1.
+
+Роль 2. Приглашённый друг
+Этап 1. Переход по реф-ссылке
+Друг открывает https://t.me/bot?start=ref_123_5.
+
+Бот получает /start ref_123_5.
+
+До создания записи проверяет: есть ли invited_id в users или participants?
+
+Нет → is_new = True, создаёт referrals со status='pending', is_new_user=1.
+
+Есть → is_new = False, приглашение не засчитывается (или сохраняется с is_new_user=0 — по твоему выбору).
+
+Этап 2. Капча
+Если капча не пройдена → бот показывает пример.
+
+После верного ответа → verified = 1.
+
+Этап 3. Подписка на каналы (если есть условия)
+Бот: «Чтобы засчитать приглашение, подпишись на: @ch1, @ch2» + кнопка «✅ Проверить подписку».
+
+Пользователь подписывается → жмёт кнопку.
+
+Бот проверяет get_chat_member по каждому каналу:
+
+Все ок → referrals.status = 'confirmed', confirmed_at = now. Бот: «✅ Приглашение засчитано!» → главное меню.
+
+Не все → «Ты не подписан на @ch2» + кнопка снова.
+
+Этап 4. Если условий нет
+После капчи бот сразу: status = 'confirmed', «✅ Приглашение засчитано!».
+
+Этап 5. Что видит друг дальше
+Может сам участвовать в розыгрыше (как обычный участник).
+
+Пригласивший получает +1 в счётчик.
+
+Роль 3. Админ
+Этап 1. Вход
+/admin → проверка user_id in ADMINS.
+
+Меню:
+
+text
+[🎁 Создать розыгрыш]
+[📊 Мои розыгрыши]
+[⚙️ Настройки]
+Этап 2. Создание розыгрыша (FSM)
+Шаг 1. Приз (текст)
+
+Бот: «Введи приз: ссылку на подарок, название, количество звёзд и т.д.»
+
+Сохраняет draft.prize_text.
+
+Шаг 2. Фото (опционально)
+
+Бот: «Пришли фото приза или /skip».
+
+Фото → message.photo[-1].file_id → draft.prize_photo.
+
+/skip → prize_photo = NULL.
+
+Шаг 3. Количество победителей
+
+Бот: «Сколько победителей? (1–100)».
+
+Валидация → draft.winners_count.
+
+Шаг 4. Условия участия
+
+Меню с мультивыбором:
+
+text
+[✅ Подписка на канал]   [⬜ Пригласить друзей]
+[⬜ Нет условий]         [➡️ Далее]
+«Подписка» → «Пришли @username каналов через запятую» → draft.required_channels = ['@ch1','@ch2'].
+
+«Пригласить друзей» → «Сколько друзей нужно пригласить? (число)» → draft.invite_count = N.
+
+«Нет условий» → сбрасывает остальные.
+
+Можно выбрать подписку + друзей вместе.
+
+Шаг 5. Дата итогов
+
+Бот: «Когда итоги? Формат ГГГГ-ММ-ДД ЧЧ:ММ».
+
+Валидация strptime, проверка что в будущем → draft.end_at.
+
+Шаг 6. Предпросмотр
+
+Бот отправляет админу ровно тот пост, что уйдёт в канал (фото + caption + кнопка «🎉 Участвовать»).
+
+Кнопки: «✅ Опубликовать» / «✏️ Изменить» / «❌ Отмена».
+
+«Изменить» → меню выбора шага для правки.
+
+Шаг 7. Публикация
+
+send_photo / send_message в канал с join:pending.
+
+Сохраняет message_id.
+
+edit_message_reply_markup → join:<giveaway_id>.
+
+draft.status = 'active'.
+
+Бот админу: «✅ Розыгрыш #5 опубликован».
+
+Этап 3. Управление розыгрышем
+В «Мои розыгрыши» → список активных, по каждому:
+
+text
+📊 Статистика (участников: X)
+🛑 Завершить досрочно
+🔔 Напомнить в канал
+🗑 Удалить
+Статистика → COUNT(participants), COUNT(referrals confirmed), список пригласивших.
+
+Завершить досрочно → выбор победителей + публикация + status='finished'.
+
+Напомнить → пост в канал «До итогов осталось N часов».
+
+Удалить → status='deleted', пост в канале можно не трогать (или удалить через delete_message).
+
+Этап 4. Автоматическое подведение итогов (фоновый поток)
+Раз в минуту поток проверяет: status='active' AND end_at <= now.
+
+Для каждого:
+
+SELECT user_id FROM participants WHERE giveaway_id = ? → список.
+
+random.sample(users, winners_count) — без повторов.
+
+Публикует в канал:
+
+text
+🎉 Итоги розыгрыша #5
+
+Победители:
+• @user1
+• @user2
+• @user3
+status = 'finished'.
+
+Если участников меньше, чем победителей → публикует всех + пометку «участников было меньше».
+
+Сводная схема (кратко)
+text
+Пользователь → /start → капча? → меню → розыгрыши → участие
+                                              ↓
+                                    проверка условий
+                                    (подписка / друзья)
+                                              ↓
+                                    ✅ в participants
+
+Друг → ref-ссылка → новый? → капча → подписка → ✅ в referrals
+
+Админ → /admin → создать → приз → фото → победители → условия → дата → предпросмотр → публикация
+                                                                                        ↓
+                                                                              фоновый поток → итоги
+Если хочешь, следующим шагом могу:
+
+расписать точные тексты сообщений для каждого этапа (чтобы было единообразие),
+
+или показать структуру файлов и что в каком модуле лежит.
+
+Что дальше?
+
+смотри, условия подписать на каналы, как делаем?
+Found 12 web pages
+Проверка подписки на каналы делается через метод Bot API getChatMember. Это единственный надёжный способ, и он требует одного обязательного условия: бот должен быть администратором в каждом проверяемом канале .
+
+🔍 Как это работает
+Бот отправляет getChatMember(chat_id=@channel, user_id=123). В ответ приходит объект со статусом пользователя. Подписанным считаем, если статус один из:
+
+creator (владелец)
+
+administrator (админ)
+
+member (обычный подписчик)
+
+Всё остальное (left, kicked) — не подписан .
+
+🛠 Как встроить в твой бот (на примере pyTelegramBotAPI / telebot)
+Так как мы обсуждали telebot, вот функция проверки, которую можно вызывать в обработчике кнопки «Участвовать» или «Проверить подписку»:
+
+python
+def check_subscriptions(bot, user_id, channels):
+    """Возвращает список каналов, на которые юзер НЕ подписан."""
+    not_subbed = []
+    for ch in channels:
+        try:
+            member = bot.get_chat_member(ch, user_id)
+            if member.status not in ('creator', 'administrator', 'member'):
+                not_subbed.append(ch)
+        except Exception:
+            # Если бот не админ или канал недоступен — считаем, что не подписан
+            not_subbed.append(ch)
+    return not_subbed
+Использование в хэндлере:
+
+python
+@bot.callback_query_handler(func=lambda call: call.data.startswith('check_sub:'))
+def handle_check_sub(call):
+    giveaway_id = int(call.data.split(':')[1])
+    channels = get_required_channels(giveaway_id) # твой список ['@ch1', '@ch2']
+    
+    not_subbed = check_subscriptions(bot, call.from_user.id, channels)
+    
+    if not_subbed:
+        bot.answer_callback_query(call.id, f"❌ Ты не подписан на: {', '.join(not_subbed)}", show_alert=True)
+        return
+    
+    # Подписки ок — засчитываем участие (или реферал)
+    add_participant(call.from_user.id, giveaway_id)
+    bot.answer_callback_query(call.id, "✅ Подписка подтверждена, ты участвуешь!")
+⚠️ Что важно не забыть
+Добавь бота в админы канала. Без этого getChatMember вернёт ошибку, и проверка не сработает .
+
+Для приватных каналов используй числовой chat_id (вида -100...), а не username. Username у приватных каналов нет.
+
+Список каналов ты уже сохраняешь в draft.required_channels на шаге создания розыгрыша. Просто передавай его в функцию проверки.
+
+Если хочешь, чтобы я показал, как это встроить конкретно в обработчик кнопки «Участвовать» (с учётом рефералов и капчи, которые мы обсуждали), скажи — соберу полный кусок кода.
+
+смотри, если есть условия подписки на канал, делаем так, пользователь нажимает участвовать, если он не подписан на какой то канал, ему пишет - для участия в розыгрыше необходимо подписаться на каналлы, снизу инлайн кнопки с каналами и проверить подписку, после "вы успешно приняли участие в розыгрыше" ну крч. оформи все красиво
+Отлично, фиксирую логику. Вот как это будет работать — красиво и по шагам.
+
+Логика проверки подписки при участии
+Сценарий 1. Пользователь подписан на все каналы
+Пользователь жмёт «🎉 Участвовать» в посте канала (или в боте).
+
+Бот проверяет get_chat_member по каждому каналу из required_channels.
+
+Все статусы member/administrator/creator → бот сразу засчитывает участие:
+
+text
+✅ Вы успешно приняли участие в розыгрыше!
+
+🎁 Приз: NFT «Роза»
+👥 Победителей: 1
+⏰ Итоги: 01.06.2026 20:00
+
+Удачи! 🍀
+INSERT INTO participants, answer_callback_query("✅ Ты в игре!").
+
+Сценарий 2. Пользователь не подписан на один или несколько каналов
+Пользователь жмёт «🎉 Участвовать».
+
+Бот проверяет каналы → находит неподписанные.
+
+Бот не засчитывает участие, а отправляет сообщение:
+
+text
+⚠️ Для участия в розыгрыше необходимо подписаться на каналы:
+
+• @channel1
+• @channel2
+
+После подписки нажми «✅ Проверить подписку».
+Снизу — инлайн-кнопки:
+
+text
+[📢 @channel1]  [📢 @channel2]
+[✅ Проверить подписку]
+Пользователь подписывается → жмёт «✅ Проверить подписку».
+
+Бот снова проверяет get_chat_member:
+
+Все ок → засчитывает участие + сообщение «✅ Вы успешно приняли участие в розыгрыше!» (как в сценарии 1).
+
+Всё ещё не подписан → answer_callback_query с алертом:
+
+text
+❌ Ты ещё не подписан на: @channel2
+И сообщение с кнопками остаётся — можно жать снова.
+
+Как оформить кнопки с каналами
+Два варианта:
+
+Вариант А. Кнопки-ссылки на каналы (красивее, пользователь сразу переходит):
+
+python
+markup = types.InlineKeyboardMarkup(row_width=1)
+for ch in not_subbed:
+    # ch = '@channel1' или '-1001234567890'
+    if ch.startswith('@'):
+        url = f"https://t.me/{ch[1:]}"
+    else:
+        # для приватных каналов ссылку надо хранить в БД (invite_link)
+        url = get_channel_invite_link(ch)
+    markup.add(types.InlineKeyboardButton(f"📢 {ch}", url=url))
+markup.add(types.InlineKeyboardButton("✅ Проверить подписку", callback_data=f"checksub:{giveaway_id}"))
+Вариант Б. Просто текст + одна кнопка «Проверить» (если ссылки на приватные каналы не хранишь):
+
+python
+markup = types.InlineKeyboardMarkup()
+markup.add(types.InlineKeyboardButton("✅ Проверить подписку", callback_data=f"checksub:{giveaway_id}"))
+Я рекомендую Вариант А — с кнопками-ссылками. Для приватных каналов нужно заранее сохранить invite_link в БД (при создании розыгрыша админ присылает ссылку-приглашение вместе с chat_id).
+
+Код обработчика
+Кнопка «Участвовать»
+python
+@bot.callback_query_handler(func=lambda call: call.data.startswith('join:'))
+def join_giveaway(call):
+    gid = int(call.data.split(':')[1])
+    uid = call.from_user.id
+
+    # 1. Капча
+    if not is_verified(uid):
+        bot.answer_callback_query(call.id, "Сначала пройди капчу: /start", show_alert=True)
+        return
+
+    # 2. Розыгрыш активен?
+    gw = get_giveaway(gid)
+    if not gw or gw['status'] != 'active':
+        bot.answer_callback_query(call.id, "Розыгрыш уже завершён", show_alert=True)
+        return
+
+    # 3. Уже участвует?
+    if is_participant(uid, gid):
+        bot.answer_callback_query(call.id, "Ты уже участвуешь", show_alert=True)
+        return
+
+    # 4. Проверка подписки
+    channels = gw['required_channels']  # список
+    not_subbed = check_subscriptions(bot, uid, channels)
+
+    if not_subbed:
+        send_subscription_prompt(call.message.chat.id, gid, not_subbed)
+        bot.answer_callback_query(call.id)
+        return
+
+    # 5. Всё ок — засчитываем
+    add_participant(uid, gid)
+    bot.answer_callback_query(call.id, "✅ Ты в игре!")
+    send_success_message(call.message.chat.id, gw)
+Сообщение с кнопками каналов
+python
+def send_subscription_prompt(chat_id, gid, not_subbed):
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    for ch in not_subbed:
+        url = channel_url(ch)  # '@ch' -> 'https://t.me/ch', или invite_link
+        markup.add(types.InlineKeyboardButton(f"📢 {ch}", url=url))
+    markup.add(types.InlineKeyboardButton(
+        "✅ Проверить подписку",
+        callback_data=f"checksub:{gid}"
+    ))
+
+    bot.send_message(
+        chat_id,
+        "⚠️ <b>Для участия в розыгрыше необходимо подписаться на каналы:</b>\n\n"
+        + "\n".join(f"• {ch}" for ch in not_subbed)
+        + "\n\nПосле подписки нажми «✅ Проверить подписку».",
+        parse_mode='HTML',
+        reply_markup=markup
+    )
+Кнопка «Проверить подписку»
+python
+@bot.callback_query_handler(func=lambda call: call.data.startswith('checksub:'))
+def check_sub_callback(call):
+    gid = int(call.data.split(':')[1])
+    uid = call.from_user.id
+
+    gw = get_giveaway(gid)
+    if not gw or gw['status'] != 'active':
+        bot.answer_callback_query(call.id, "Розыгрыш уже завершён", show_alert=True)
+        return
+
+    if is_participant(uid, gid):
+        bot.answer_callback_query(call.id, "Ты уже участвуешь", show_alert=True)
+        return
+
+    not_subbed = check_subscriptions(bot, uid, gw['required_channels'])
+
+    if not_subbed:
+        bot.answer_callback_query(
+            call.id,
+            f"❌ Ты ещё не подписан на: {', '.join(not_subbed)}",
+            show_alert=True
+        )
+        return
+
+    # Подписка подтверждена
+    add_participant(uid, gid)
+    bot.answer_callback_query(call.id, "✅ Подписка подтверждена!")
+
+    # Красивое сообщение об успехе
+    bot.edit_message_text(
+        "✅ <b>Вы успешно приняли участие в розыгрыше!</b>\n\n"
+        f"🎁 Приз: {gw['prize_text']}\n"
+        f"👥 Победителей: {gw['winners_count']}\n"
+        f"⏰ Итоги: {format_date(gw['end_at'])}\n\n"
+        "Удачи! 🍀",
+        chat_id=call.message.chat.id,
+        message_id=call.message.message_id,
+        parse_mode='HTML'
+    )
+Мелочи для красоты
+answer_callback_query обязателен на каждое нажатие — иначе у пользователя крутится спиннер.
+
+При ошибке подписки — show_alert=True, чтобы пользователь точно увидел, на что не подписан.
+
+Сообщение с кнопками лучше не редактировать при неудачной проверке — пусть остаётся, чтобы можно было жать снова.
+
+Успех — редактируем сообщение с кнопками на текст «✅ Вы успешно приняли участие» (кнопки убираются).
+
+Приватные каналы — храни invite_link в БД при создании розыгрыша, иначе кнопку-ссылку не сделать.
+
+Если ок — следующим шагом могу показать, как админ при создании розыгрыша вводит каналы (с chat_id и invite_link для приватных), чтобы эта проверка потом работала без сюрпризов.
+
+кнопки ссылки, дальше
+Отлично, идём дальше. Раз кнопки-ссылки — фиксирую, как админ вводит каналы при создании розыгрыша, чтобы эти кнопки потом корректно строились.
+
+Шаг «Подписка на каналы» при создании розыгрыша
+Что нужно от админа
+Для каждого канала нужны две вещи:
+
+chat_id — для get_chat_member (проверка подписки).
+
+Ссылка — для кнопки-ссылки (https://t.me/... или invite-ссылка для приватного).
+
+Для публичных каналов ссылка строится автоматически из username: @channel → https://t.me/channel. Для приватных — нужна invite-ссылка, и её надо сохранить.
+
+Формат ввода (чтобы не запутаться)
+Предлагаю такой сценарий:
+
+Бот: «Пришли каналы, на которые нужно подписаться. Формат:
+
+text
+@channel1
+@channel2
+Для приватного канала: -1001234567890 | https://t.me/+AbCdEf
+Каждый канал — с новой строки. Когда закончишь — напиши /done»
+
+Почему так:
+
+Публичный канал → одна строка @channel, ссылка строится сама.
+
+Приватный → chat_id | invite_link, обе части сохраняются.
+
+/done — явный конец ввода, чтобы не гадать, закончил ли админ.
+
+Валидация каждого канала
+Когда админ присылает строку, бот проверяет:
+
+python
+def parse_channel_line(line):
+    line = line.strip()
+    if '|' in line:
+        chat_id, invite_link = [x.strip() for x in line.split('|', 1)]
+        if not invite_link.startswith('https://t.me/'):
+            return None, "Ссылка должна начинаться с https://t.me/"
+        return {'chat_id': chat_id, 'invite_link': invite_link}, None
+    else:
+        if not line.startswith('@'):
+            return None, "Публичный канал должен начинаться с @"
+        return {'chat_id': line, 'invite_link': f"https://t.me/{line[1:]}"}, None
+Дополнительно можно проверить, что бот реально админ в канале:
+
+python
+def bot_is_admin(bot, chat_id):
+    try:
+        me = bot.get_me()
+        member = bot.get_chat_member(chat_id, me.id)
+        return member.status in ('administrator', 'creator')
+    except Exception:
+        return False
+Если бот не админ — сразу предупредить: «⚠️ Бот не админ в @channel1. Добавь бота в админы, иначе проверка подписки не сработает». Это сэкономит кучу нервов позже.
+
+Сохранение в БД
+В giveaways добавляем поле required_channels (JSON):
+
+json
+[
+  {"chat_id": "@channel1", "invite_link": "https://t.me/channel1"},
+  {"chat_id": "-1001234567890", "invite_link": "https://t.me/+AbCdEf"}
+]
+При участии бот берёт chat_id для get_chat_member и invite_link для кнопки.
+
+Построение кнопок-ссылок
+python
+def send_subscription_prompt(chat_id, gid, not_subbed):
+    # not_subbed = [{'chat_id': ..., 'invite_link': ...}, ...]
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    for ch in not_subbed:
+        label = ch['chat_id'] if ch['chat_id'].startswith('@') else "Приватный канал"
+        markup.add(types.InlineKeyboardButton(f"📢 {label}", url=ch['invite_link']))
+    markup.add(types.InlineKeyboardButton(
+        "✅ Проверить подписку",
+        callback_data=f"checksub:{gid}"
+    ))
+    ...
+Как выглядит сообщение пользователю
+text
+⚠️ Для участия в розыгрыше необходимо подписаться на каналы:
+
+• @channel1
+• Приватный канал
+
+[📢 @channel1]
+[📢 Приватный канал]
+[✅ Проверить подписку]
+Для приватного канала в тексте пишем «Приватный канал» (username нет), а кнопка ведёт по invite-ссылке.
+
+Один нюанс
+Invite-ссылка может протухнуть. Если админ дал одноразовую ссылку — она сгорит после первого перехода. Для розыгрышей лучше использовать постоянную invite-ссылку канала (не одноразовую). При вводе можно предупредить: «Используй постоянную ссылку-приглашение, а не одноразовую».
+
+Если ссылка всё же протухла — пользователь нажмёт «Проверить подписку», получит «не подписан», и застрянет. Поэтому в админке стоит добавить кнопку «🔄 Обновить ссылку» для каждого канала.
+
+Что дальше?
+Могу расписать:
+
+Полный FSM админа — как шаги связаны, что хранится в черновике, как работает «✏️ Изменить».
+
+Структуру файлов — что в каком модуле.
+
+Тексты всех сообщений — единым списком, чтобы потом просто скопировать.
+
+Что выбираешь?
+
+тексты, покажи всю работу бота, кнопки и тд
+Ниже — полный сценарий бота: все сообщения, кнопки и переходы. Разделил на роли, чтобы было видно, кто что видит.
+
+РОЛЬ 1. УЧАСТНИК
+1.1. Первый заход — капча
+Пользователь: /start
+
+Бот:
+
+text
+🧮 Реши пример, чтобы продолжить:
+
+7 + 5 = ?
+
+[ 9 ]  [ 12 ]
+[ 15 ] [ 10 ]
+Инлайн-кнопки с вариантами, правильный ответ среди них.
+
+Если неверно:
+answer_callback_query: ❌ Неверно, попробуй ещё раз
+(сообщение с примером остаётся, кнопки не меняются)
+
+Если верно:
+
+text
+✅ Капча пройдена. Добро пожаловать!
+
+👋 Привет! Ты в боте розыгрышей.
+
+[🎁 Активные розыгрыши]
+[🏆 Мои приглашения]
+[📊 Мои участия]
+1.2. Повторный заход
+Пользователь: /start (капча уже пройдена)
+
+Бот:
+
+text
+👋 Привет! Ты в боте розыгрышей.
+
+[🎁 Активные розыгрыши]
+[🏆 Мои приглашения]
+[📊 Мои участия]
+1.3. Активные розыгрыши
+Пользователь: [🎁 Активные розыгрыши]
+
+Бот:
+
+text
+🎁 Активные розыгрыши:
+
+[#5 — NFT «Роза»]
+[#6 — 100 ⭐ на аккаунт]
+[#7 — Подарок «Медведь»]
+Если пусто:
+
+text
+😔 Сейчас нет активных розыгрышей. Загляни позже!
+1.4. Карточка розыгрыша
+Пользователь: [#5 — NFT «Роза»]
+
+Бот (если есть фото — отправляет фото с подписью, если нет — текст):
+
+text
+🎁 Розыгрыш #5: NFT «Роза»
+
+🔗 https://t.me/nft/...
+
+Условия участия:
+• Подписка: @channel1, @channel2
+• Пригласить друзей: 2
+
+👥 Победителей: 1
+⏰ Итоги: 01.06.2026 20:00
+
+[🎉 Участвовать]
+[📋 Мои приглашения]
+1.5. Нажатие «🎉 Участвовать» — подписан на всё
+Пользователь: [🎉 Участвовать]
+
+Бот (редактирует карточку):
+
+text
+✅ Вы успешно приняли участие в розыгрыше!
+
+🎁 Приз: NFT «Роза»
+👥 Победителей: 1
+⏰ Итоги: 01.06.2026 20:00
+
+Удачи! 🍀
+answer_callback_query: ✅ Ты в игре!
+
+1.6. Нажатие «🎉 Участвовать» — не подписан
+Пользователь: [🎉 Участвовать]
+
+Бот (новое сообщение):
+
+text
+⚠️ Для участия в розыгрыше необходимо подписаться на каналы:
+
+• @channel1
+• @channel2
+
+После подписки нажми «✅ Проверить подписку».
+
+[📢 @channel1]
+[📢 @channel2]
+[✅ Проверить подписку]
+answer_callback_query (без текста, просто закрыть спиннер)
+
+1.7. Нажатие «✅ Проверить подписку» — всё ещё не подписан
+Пользователь: [✅ Проверить подписку]
+
+Бот (алерт):
+
+text
+❌ Ты ещё не подписан на: @channel2
+Сообщение с кнопками остаётся, можно жать снова.
+
+1.8. Нажатие «✅ Проверить подписку» — подписался
+Пользователь: [✅ Проверить подписку]
+
+Бот (редактирует сообщение с кнопками):
+
+text
+✅ Вы успешно приняли участие в розыгрыше!
+
+🎁 Приз: NFT «Роза»
+👥 Победителей: 1
+⏰ Итоги: 01.06.2026 20:00
+
+Удачи! 🍀
+answer_callback_query: ✅ Подписка подтверждена!
+
+1.9. Условие «Пригласить друзей»
+Пользователь: [🎉 Участвовать] (у розыгрыша условие — пригласить 2 друзей)
+
+Бот (если друзей не хватает):
+
+text
+⚠️ Для участия нужно пригласить новых друзей: 2
+
+Ты пригласил: 0 / 2
+
+Твоя персональная ссылка:
+https://t.me/your_bot?start=ref_123_5
+
+📌 Как это работает:
+1. Перешли ссылку другу
+2. Друг заходит в бота и проходит капчу
+3. Друг подписывается на каналы розыгрыша
+4. Приглашение засчитывается автоматически
+
+[📋 Скопировать ссылку]
+[✅ Проверить приглашения]
+Если хватает:
+
+text
+✅ Вы успешно приняли участие в розыгрыше!
+...
+1.10. «🏆 Мои приглашения»
+Пользователь: [🏆 Мои приглашения]
+
+Бот:
+
+text
+🏆 Твои приглашения:
+
+🎉 Розыгрыш #5 — NFT «Роза»
+Приглашено новых: 1 / 2
+https://t.me/your_bot?start=ref_123_5
+
+🎉 Розыгрыш #8 — 50 ⭐
+Приглашено новых: 3 / 3 ✅
+https://t.me/your_bot?start=ref_123_8
+Если пусто:
+
+text
+😔 Ты пока никого не приглашал.
+1.11. «📊 Мои участия»
+Пользователь: [📊 Мои участия]
+
+Бот:
+
+text
+📊 Твои участия:
+
+🟢 #5 — NFT «Роза» — активно
+🟢 #8 — 50 ⭐ — активно
+⚪ #3 — Подарок «Медведь» — завершён
+РОЛЬ 2. ПРИГЛАШЁННЫЙ ДРУГ
+2.1. Переход по реф-ссылке
+Друг: открывает https://t.me/your_bot?start=ref_123_5
+
+Бот (если новый пользователь):
+
+text
+🧮 Реши пример, чтобы продолжить:
+
+3 + 9 = ?
+
+[ 11 ] [ 12 ]
+[ 14 ] [ 10 ]
+После верного ответа:
+
+text
+✅ Капча пройдена!
+
+⚠️ Чтобы засчитать приглашение, подпишись на каналы:
+
+• @channel1
+• @channel2
+
+[📢 @channel1]
+[📢 @channel2]
+[✅ Проверить подписку]
+После проверки:
+
+text
+✅ Приглашение засчитано! Добро пожаловать!
+
+[🎁 Активные розыгрыши]
+[🏆 Мои приглашения]
+[📊 Мои участия]
+Если пользователь уже был в боте:
+
+text
+👋 Ты уже зарегистрирован в боте раньше.
+Приглашение не будет засчитано как «новый друг».
+
+[🎁 Активные розыгрыши]
+...
+РОЛЬ 3. АДМИН
+3.1. Вход
+Админ: /admin
+
+Бот:
+
+text
+⚙️ Админ-панель
+
+[🎁 Создать розыгрыш]
+[📊 Мои розыгрыши]
+[⚙️ Настройки]
+3.2. Создание — шаг 1: приз
+Админ: [🎁 Создать розыгрыш]
+
+Бот:
+
+text
+📝 Шаг 1 из 6 — Приз
+
+Введи приз: ссылку на подарок, название, количество звёзд и т.д.
+
+Пример:
+NFT «Роза» из коллекции X — https://t.me/nft/...
+или
+100 ⭐ на твой аккаунт
+Админ: NFT «Роза» — https://t.me/nft/abc
+
+Бот:
+
+text
+✅ Приз сохранён.
+
+📷 Шаг 2 из 6 — Фото
+
+Пришли фото приза или напиши /skip.
+3.3. Шаг 2: фото
+Админ: (присылает фото)
+
+Бот:
+
+text
+✅ Фото сохранено.
+
+👥 Шаг 3 из 6 — Победители
+
+Сколько победителей? (число от 1 до 100)
+Если /skip:
+
+text
+✅ Без фото.
+
+👥 Шаг 3 из 6 — Победители
+
+Сколько победителей? (число от 1 до 100)
+3.4. Шаг 3: победители
+Админ: 3
+
+Бот:
+
+text
+✅ Победителей: 3
+
+📋 Шаг 4 из 6 — Условия участия
+
+Выбери условия (можно несколько):
+
+[✅ Подписка на канал]
+[⬜ Пригласить друзей]
+[⬜ Нет условий]
+[➡️ Далее]
+3.5. Шаг 4: условия — подписка
+Админ: [✅ Подписка на канал]
+
+Бот:
+
+text
+📢 Пришли каналы, на которые нужно подписаться.
+
+Формат:
+@channel1
+@channel2
+
+Для приватного канала:
+-1001234567890 | https://t.me/+AbCdEf
+
+Каждый канал — с новой строки.
+Когда закончишь — напиши /done
+Админ:
+
+text
+@channel1
+@channel2
+Бот (проверяет, что он админ в каждом):
+
+text
+✅ Каналы добавлены:
+• @channel1
+• @channel2
+
+[✅ Подписка на канал]
+[✅ Пригласить друзей]
+[⬜ Нет условий]
+[➡️ Далее]
+Если бот не админ:
+
+text
+⚠️ Бот не админ в @channel2.
+Добавь бота в админы канала, иначе проверка подписки не сработает.
+
+Продолжить всё равно?
+[✅ Да] [❌ Нет, ввести заново]
+3.6. Шаг 4: условия — пригласить друзей
+Админ: [✅ Пригласить друзей]
+
+Бот:
+
+text
+👥 Сколько новых друзей нужно пригласить?
+
+(число от 1 до 50)
+Админ: 2
+
+Бот:
+
+text
+✅ Нужно пригласить: 2 новых друга.
+
+[✅ Подписка на канал]
+[✅ Пригласить друзей]
+[⬜ Нет условий]
+[➡️ Далее]
+3.7. Шаг 4: «Нет условий»
+Админ: [⬜ Нет условий]
+
+Бот:
+
+text
+✅ Условия сброшены — участвовать смогут все.
+
+[⬜ Подписка на канал]
+[⬜ Пригласить друзей]
+[✅ Нет условий]
+[➡️ Далее]
+3.8. Шаг 5: дата
+Админ: [➡️ Далее]
+
+Бот:
+
+text
+⏰ Шаг 5 из 6 — Дата итогов
+
+Когда подвести итоги?
+Формат: ГГГГ-ММ-ДД ЧЧ:ММ
+
+Пример: 2026-06-01 20:00
+Админ: 2026-06-01 20:00
+
+Если формат неверный:
+
+text
+❌ Неверный формат. Попробуй ещё раз.
+Пример: 2026-06-01 20:00
+Если дата в прошлом:
+
+text
+❌ Дата должна быть в будущем. Попробуй ещё раз.
+Если ок:
+
+text
+✅ Итоги: 01.06.2026 20:00
+
+👀 Шаг 6 из 6 — Предпросмотр
+3.9. Шаг 6: предпросмотр
+Бот (отправляет ровно тот пост, что уйдёт в канал):
+
+[фото приза]
+
+text
+🎁 Розыгрыш: NFT «Роза»
+
+🔗 https://t.me/nft/abc
+
+Условия участия:
+• Подписка: @channel1, @channel2
+• Пригласить друзей: 2
+
+👥 Победителей: 3
+⏰ Итоги: 01.06.2026 20:00
+
+[🎉 Участвовать]
+Бот (отдельным сообщением):
+
+text
+👀 Проверь пост выше.
+
+[✅ Опубликовать]
+[✏️ Изменить]
+[❌ Отмена]
+3.10. «✏️ Изменить»
+Админ: [✏️ Изменить]
+
+Бот:
+
+text
+Что изменить?
+
+[📝 Приз]
+[📷 Фото]
+[👥 Победителей]
+[📋 Условия]
+[⏰ Дату]
+[⬅️ Назад к предпросмотру]
+Выбор любого пункта → возврат к соответствующему шагу, потом снова предпросмотр.
+
+3.11. «✅ Опубликовать»
+Админ: [✅ Опубликовать]
+
+Бот (в личку админу):
+
+text
+✅ Розыгрыш #5 опубликован в канале!
+
+📊 Управление:
+[📊 Статистика]
+[🛑 Завершить досрочно]
+[🔔 Напомнить]
+[🗑 Удалить]
+В канал уходит пост с кнопкой [🎉 Участвовать].
+
+3.12. «📊 Мои розыгрыши»
+Админ: [📊 Мои розыгрыши]
+
+Бот:
+
+text
+📊 Твои розыгрыши:
+
+🟢 #5 — NFT «Роза» — активно (12 участников)
+🟢 #6 — 100 ⭐ — активно (5 участников)
+⚪ #3 — Подарок «Медведь» — завершён
+По нажатию на розыгрыш:
+
+text
+🎁 Розыгрыш #5 — NFT «Роза»
+
+👥 Участников: 12
+🏆 Победителей: 3
+⏰ Итоги: 01.06.2026 20:00
+📢 Каналы: @channel1, @channel2
+👫 Приглашения: нужно 2
+
+[📊 Статистика]
+[🛑 Завершить досрочно]
+[🔔 Напомнить]
+[🗑 Удалить]
+[⬅️ Назад]
+3.13. «📊 Статистика»
+Админ: [📊 Статистика]
+
+Бот:
+
+text
+📊 Статистика розыгрыша #5
+
+👥 Участников: 12
+👫 Приглашений засчитано: 8
+🏆 Победителей: 3
+⏰ До итогов: 2 дня 4 часа
+
+Топ пригласивших:
+1. @user1 — 4
+2. @user2 — 3
+3. @user3 — 1
+
+[⬅️ Назад]
+3.14. «🛑 Завершить досрочно»
+Админ: [🛑 Завершить досрочно]
+
+Бот:
+
+text
+⚠️ Завершить розыгрыш #5 досрочно?
+
+Сейчас участников: 12
+Будут выбраны 3 победителя случайным образом.
+
+[✅ Да, завершить]
+[❌ Отмена]
+После подтверждения — бот публикует итоги в канал (см. 4.1) и пишет админу:
+
+text
+✅ Розыгрыш #5 завершён. Победители опубликованы в канале.
+3.15. «🔔 Напомнить»
+Админ: [🔔 Напомнить]
+
+Бот (в канал):
+
+text
+🔔 Напоминание!
+
+До итогов розыгрыша «NFT «Роза» осталось 24 часа.
+
+Успей принять участие!
+[🎉 Участвовать]
+3.16. «🗑 Удалить»
+Админ: [🗑 Удалить]
+
+Бот:
+
+text
+⚠️ Удалить розыгрыш #5?
+
+Пост в канале будет удалён, участие закроется.
+Действие необратимо.
+
+[✅ Да, удалить]
+[❌ Отмена]
+РОЛЬ 4. АВТОМАТИЧЕСКОЕ ПОДВЕДЕНИЕ ИТОГОВ
+4.1. Публикация итогов в канал
+Бот (в канал, по таймеру или по кнопке):
+
+[ответом на пост розыгрыша]
+
+text
+🎉 Итоги розыгрыша #5 — NFT «Роза»
+
+🏆 Победители:
+• @user1
+• @user2
+• @user3
+
+Поздравляем! 🎊
+Свяжитесь с администратором для получения приза.
+Если участников меньше, чем победителей:
+
+text
+🎉 Итоги розыгрыша #5 — NFT «Роза»
+
+🏆 Победители (участников было меньше, чем призов):
+• @user1
+• @user2
+
+Поздравляем! 🎊
+Если участников нет:
+
+text
+😔 Розыгрыш #5 — NFT «Роза» завершён.
+
+К сожалению, участников не было. Приз остаётся у организатора.
+СВОДНАЯ КАРТА ПЕРЕХОДОВ
+text
+/start
+  ├─ капча не пройдена → капча → меню
+  └─ капча пройдена → меню
+       ├─ 🎁 Активные → карточка → 🎉 Участвовать
+       │                              ├─ подписан → ✅ участие
+       │                              └─ не подписан → кнопки каналов → проверить → ✅
+       ├─ 🏆 Мои приглашения → список ссылок и счётчиков
+       └─ 📊 Мои участия → список
+
+ref-ссылка
+  ├─ новый → капча → подписка → ✅ приглашение засчитано
+  └─ старый → «уже зарегистрирован» → меню
+
+/admin
+  └─ 🎁 Создать
+       ├─ 1. Приз (текст)
+       ├─ 2. Фото (/skip)
+       ├─ 3. Победители (число)
+       ├─ 4. Условия (мультивыбор + каналы / друзья / нет)
+       ├─ 5. Дата (ГГГГ-ММ-ДД ЧЧ:ММ)
+       └─ 6. Предпросмотр → ✅ Опубликовать / ✏️ Изменить / ❌ Отмена
+Это полный сценарий. Если хочешь, следующим шагом могу:
+
+собрать все тексты в один Python-файл (texts.py) с константами, чтобы не хардкодить в хэндлерах;
+
+или показать структуру проекта — какой файл за что отвечает.
+
+фулл код, ток бота делай на двух админов
+Собрал полный проект. Бот на pyTelegramBotAPI, SQLite, два админа через ADMINS = [id1, id2]. Всё в одном файле — проще запустить, потом можно разнести по модулям.
+
+Перед запуском:
+
+pip install pytelegrambotapi
+
+Вписать BOT_TOKEN, ADMINS, CHANNEL_ID (канал, куда публикуются розыгрыши).
+
+Бот должен быть админом в канале публикации и во всех каналах, на которые проверяется подписка (иначе get_chat_member вернёт ошибку).
+
+python
+import sqlite3
+import random
+import threading
+import time
+import json
+from datetime import datetime
+
+import telebot
+from telebot import types
+
+# ============ КОНФИГ ============
+BOT_TOKEN = "ВСТАВЬ_ТОКЕН"
+ADMINS = [111111111, 222222222]   # два админа
+CHANNEL_ID = "@your_channel"      # канал для публикации розыгрышей
+
+bot = telebot.TeleBot(BOT_TOKEN)
+
+# ============ БД ============
+conn = sqlite3.connect("bot.db", check_same_thread=False)
+cur = conn.cursor()
+
+cur.executescript("""
+CREATE TABLE IF NOT EXISTS users (
+    user_id INTEGER PRIMARY KEY,
+    username TEXT,
+    verified INTEGER DEFAULT 0,
+    first_seen_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS giveaways (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    status TEXT DEFAULT 'draft',          -- draft / active / finished / deleted
+    prize_text TEXT,
+    prize_photo TEXT,
+    winners_count INTEGER,
+    required_channels TEXT,               -- JSON list [{"chat_id":..., "invite_link":...}]
+    invite_count INTEGER DEFAULT 0,
+    no_conditions INTEGER DEFAULT 0,
+    end_at TEXT,
+    channel_id TEXT,
+    message_id INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS participants (
+    user_id INTEGER NOT NULL,
+    giveaway_id INTEGER NOT NULL,
+    joined_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, giveaway_id)
+);
+
+CREATE TABLE IF NOT EXISTS referrals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    giveaway_id INTEGER NOT NULL,
+    inviter_id INTEGER NOT NULL,
+    invited_id INTEGER NOT NULL,
+    is_new_user INTEGER DEFAULT 1,
+    status TEXT DEFAULT 'pending',        -- pending / confirmed
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    confirmed_at TEXT,
+    UNIQUE(giveaway_id, invited_id)
+);
+""")
+conn.commit()
+
+# ============ УТИЛИТЫ ============
+def is_admin(uid):
+    return uid in ADMINS
+
+def is_verified(uid):
+    cur.execute("SELECT verified FROM users WHERE user_id=?", (uid,))
+    r = cur.fetchone()
+    return bool(r and r[0])
+
+def ensure_user(uid, username=""):
+    cur.execute("INSERT OR IGNORE INTO users (user_id, username) VALUES (?,?)", (uid, username))
+    conn.commit()
+
+def user_exists(uid):
+    cur.execute("SELECT 1 FROM users WHERE user_id=?", (uid,))
+    return cur.fetchone() is not None
+
+def mark_verified(uid):
+    cur.execute("UPDATE users SET verified=1 WHERE user_id=?", (uid,))
+    conn.commit()
+
+def get_giveaway(gid):
+    cur.execute("SELECT * FROM giveaways WHERE id=?", (gid,))
+    row = cur.fetchone()
+    if not row:
+        return None
+    cols = [d[0] for d in cur.description]
+    return dict(zip(cols, row))
+
+def get_active_giveaways():
+    cur.execute("SELECT id, prize_text FROM giveaways WHERE status='active'")
+    return cur.fetchall()
+
+def is_participant(uid, gid):
+    cur.execute("SELECT 1 FROM participants WHERE user_id=? AND giveaway_id=?", (uid, gid))
+    return cur.fetchone() is not None
+
+def add_participant(uid, gid):
+    cur.execute("INSERT OR IGNORE INTO participants (user_id, giveaway_id) VALUES (?,?)", (uid, gid))
+    conn.commit()
+
+def check_subscriptions(uid, channels):
+    """channels = [{'chat_id':..., 'invite_link':...}]"""
+    not_subbed = []
+    for ch in channels:
+        try:
+            m = bot.get_chat_member(ch["chat_id"], uid)
+            if m.status not in ("creator", "administrator", "member"):
+                not_subbed.append(ch)
+        except Exception:
+            not_subbed.append(ch)
+    return not_subbed
+
+def confirmed_invites(uid, gid):
+    cur.execute("""
+        SELECT COUNT(*) FROM referrals
+        WHERE inviter_id=? AND giveaway_id=? AND status='confirmed' AND is_new_user=1
+    """, (uid, gid))
+    return cur.fetchone()[0]
+
+def format_date(iso):
+    try:
+        return datetime.fromisoformat(iso).strftime("%d.%m.%Y %H:%M")
+    except Exception:
+        return iso
+
+def mention(uid, username=None):
+    if username:
+        return f"@{username}"
+    return f"<a href='tg://user?id={uid}'>участник {uid}</a>"
+
+# ============ КАПЧА ============
+def send_captcha(chat_id):
+    a, b = random.randint(1, 10), random.randint(1, 10)
+    correct = a + b
+    wrong = set()
+    while len(wrong) < 3:
+        w = random.randint(2, 20)
+        if w != correct:
+            wrong.add(w)
+    options = list(wrong) + [correct]
+    random.shuffle(options)
+
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(*[
+        types.InlineKeyboardButton(str(o), callback_data=f"cap:{correct}:{o}")
+        for o in options
+    ])
+    bot.send_message(
+        chat_id,
+        f"🧮 <b>Реши пример, чтобы продолжить:</b>\n\n<b>{a} + {b} = ?</b>",
+        parse_mode="HTML",
+        reply_markup=markup
+    )
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("cap:"))
+def cap_handler(call):
+    _, correct, chosen = call.data.split(":")
+    if int(chosen) == int(correct):
+        mark_verified(call.from_user.id)
+        bot.answer_callback_query(call.id, "✅ Верно!")
+        bot.edit_message_text(
+            "✅ Капча пройдена. Добро пожаловать!",
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id
+        )
+        show_main_menu(call.message.chat.id)
+        # если был pending-реферал — предложим подписку
+        try_confirm_pending_referral(call.message.chat.id, call.from_user.id)
+    else:
+        bot.answer_callback_query(call.id, "❌ Неверно, попробуй ещё раз", show_alert=True)
+
+# ============ ГЛАВНОЕ МЕНЮ ============
+def show_main_menu(chat_id):
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        types.InlineKeyboardButton("🎁 Активные розыгрыши", callback_data="menu:active"),
+        types.InlineKeyboardButton("🏆 Мои приглашения", callback_data="menu:refs"),
+        types.InlineKeyboardButton("📊 Мои участия", callback_data="menu:my"),
+    )
+    bot.send_message(chat_id, "👋 Привет! Ты в боте розыгрышей.", reply_markup=markup)
+
+@bot.message_handler(commands=["start"])
+def start_cmd(message):
+    uid = message.from_user.id
+    args = message.text.split(maxsplit=1)
+    payload = args[1] if len(args) > 1 else None
+
+    is_new = not user_exists(uid)
+    ensure_user(uid, message.from_user.username or "")
+
+    if payload and payload.startswith("ref_"):
+        try:
+            _, inviter_id, giveaway_id = payload.split("_")
+            inviter_id, giveaway_id = int(inviter_id), int(giveaway_id)
+            if inviter_id == uid:
+                bot.send_message(message.chat.id, "Нельзя пригласить самого себя.")
+            elif not is_new:
+                bot.send_message(
+                    message.chat.id,
+                    "👋 Ты уже зарегистрирован в боте раньше.\n"
+                    "Приглашение не будет засчитано как «новый друг»."
+                )
+            else:
+                cur.execute(
+                    "INSERT OR IGNORE INTO referrals (giveaway_id, inviter_id, invited_id, is_new_user) VALUES (?,?,?,1)",
+                    (giveaway_id, inviter_id, uid)
+                )
+                conn.commit()
+        except ValueError:
+            pass
+
+    if not is_verified(uid):
+        send_captcha(message.chat.id)
+        return
+
+    # если есть pending-реферал — сначала подписка
+    if try_confirm_pending_referral(message.chat.id, uid):
+        return
+
+    show_main_menu(message.chat.id)
+
+def try_confirm_pending_referral(chat_id, uid):
+    cur.execute("""
+        SELECT id, giveaway_id FROM referrals
+        WHERE invited_id=? AND status='pending'
+        ORDER BY id DESC LIMIT 1
+    """, (uid,))
+    row = cur.fetchone()
+    if not row:
+        return False
+    ref_id, gid = row
+    gw = get_giveaway(gid)
+    if not gw or gw["status"] != "active":
+        cur.execute("UPDATE referrals SET status='pending' WHERE id=?", (ref_id,))
+        conn.commit()
+        return False
+
+    channels = json.loads(gw["required_channels"] or "[]")
+    if not channels:
+        confirm_referral(ref_id)
+        bot.send_message(chat_id, "✅ Приглашение засчитано! Добро пожаловать!")
+        return True
+
+    not_subbed = check_subscriptions(uid, channels)
+    if not_subbed:
+        send_sub_prompt(chat_id, gid, not_subbed, ref_id=ref_id)
+        return True
+
+    confirm_referral(ref_id)
+    bot.send_message(chat_id, "✅ Приглашение засчитано! Добро пожаловать!")
+    return True
+
+def confirm_referral(ref_id):
+    cur.execute(
+        "UPDATE referrals SET status='confirmed', confirmed_at=? WHERE id=?",
+        (datetime.now().isoformat(), ref_id)
+    )
+    conn.commit()
+
+# ============ МЕНЮ УЧАСТНИКА ============
+@bot.callback_query_handler(func=lambda c: c.data == "menu:active")
+def menu_active(call):
+    rows = get_active_giveaways()
+    if not rows:
+        bot.answer_callback_query(call.id)
+        bot.send_message(call.message.chat.id, "😔 Сейчас нет активных розыгрышей.")
+        return
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    for gid, prize in rows:
+        markup.add(types.InlineKeyboardButton(f"#{gid} — {prize[:40]}", callback_data=f"gw:{gid}"))
+    bot.answer_callback_query(call.id)
+    bot.send_message(call.message.chat.id, "🎁 Активные розыгрыши:", reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("gw:"))
+def show_giveaway(call):
+    gid = int(call.data.split(":")[1])
+    gw = get_giveaway(gid)
+    if not gw:
+        bot.answer_callback_query(call.id, "Розыгрыш не найден", show_alert=True)
+        return
+
+    channels = json.loads(gw["required_channels"] or "[]")
+    cond_lines = []
+    if channels:
+        cond_lines.append("• Подписка: " + ", ".join(
+            ch["chat_id"] if ch["chat_id"].startswith("@") else "Приватный канал"
+            for ch in channels
+        ))
+    if gw["invite_count"]:
+        cond_lines.append(f"• Пригласить друзей: {gw['invite_count']}")
+    if not cond_lines:
+        cond_lines.append("• Нет условий")
+
+    text = (
+        f"🎁 <b>Розыгрыш #{gid}: {gw['prize_text']}</b>\n\n"
+        f"<b>Условия участия:</b>\n" + "\n".join(cond_lines) + "\n\n"
+        f"👥 Победителей: {gw['winners_count']}\n"
+        f"⏰ Итоги: {format_date(gw['end_at'])}"
+    )
+
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(types.InlineKeyboardButton("🎉 Участвовать", callback_data=f"join:{gid}"))
+    if gw["invite_count"]:
+        markup.add(types.InlineKeyboardButton("📋 Мои приглашения", callback_data=f"myrefs:{gid}"))
+
+    bot.answer_callback_query(call.id)
+    if gw["prize_photo"]:
+        bot.send_photo(call.message.chat.id, gw["prize_photo"], caption=text,
+                       parse_mode="HTML", reply_markup=markup)
+    else:
+        bot.send_message(call.message.chat.id, text, parse_mode="HTML", reply_markup=markup)
+
+def send_sub_prompt(chat_id, gid, not_subbed, ref_id=None):
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    for ch in not_subbed:
+        label = ch["chat_id"] if ch["chat_id"].startswith("@") else "Приватный канал"
+        markup.add(types.InlineKeyboardButton(f"📢 {label}", url=ch["invite_link"]))
+    cb = f"checksub:{gid}" + (f":ref:{ref_id}" if ref_id else "")
+    markup.add(types.InlineKeyboardButton("✅ Проверить подписку", callback_data=cb))
+
+    bot.send_message(
+        chat_id,
+        "⚠️ <b>Для участия в розыгрыше необходимо подписаться на каналы:</b>\n\n"
+        + "\n".join(
+            f"• {ch['chat_id'] if ch['chat_id'].startswith('@') else 'Приватный канал'}"
+            for ch in not_subbed
+        )
+        + "\n\nПосле подписки нажми «✅ Проверить подписку».",
+        parse_mode="HTML",
+        reply_markup=markup
+    )
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("join:"))
+def join_handler(call):
+    gid = int(call.data.split(":")[1])
+    uid = call.from_user.id
+
+    if not is_verified(uid):
+        bot.answer_callback_query(call.id, "Сначала пройди капчу: /start", show_alert=True)
+        return
+
+    gw = get_giveaway(gid)
+    if not gw or gw["status"] != "active":
+        bot.answer_callback_query(call.id, "Розыгрыш уже завершён", show_alert=True)
+        return
+
+    if is_participant(uid, gid):
+        bot.answer_callback_query(call.id, "Ты уже участвуешь", show_alert=True)
+        return
+
+    channels = json.loads(gw["required_channels"] or "[]")
+    not_subbed = check_subscriptions(uid, channels) if channels else []
+
+    if not_subbed:
+        send_sub_prompt(call.message.chat.id, gid, not_subbed)
+        bot.answer_callback_query(call.id)
+        return
+
+    if gw["invite_count"]:
+        have = confirmed_invites(uid, gid)
+        if have < gw["invite_count"]:
+            send_invite_prompt(call.message.chat.id, gid, uid, have, gw["invite_count"])
+            bot.answer_callback_query(call.id)
+            return
+
+    add_participant(uid, gid)
+    bot.answer_callback_query(call.id, "✅ Ты в игре!")
+    bot.edit_message_text(
+        "✅ <b>Вы успешно приняли участие в розыгрыше!</b>\n\n"
+        f"🎁 Приз: {gw['prize_text']}\n"
+        f"👥 Победителей: {gw['winners_count']}\n"
+        f"⏰ Итоги: {format_date(gw['end_at'])}\n\n"
+        "Удачи! 🍀",
+        chat_id=call.message.chat.id,
+        message_id=call.message.message_id,
+        parse_mode="HTML"
+    )
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("checksub:"))
+def checksub_handler(call):
+    parts = call.data.split(":")
+    gid = int(parts[1])
+    ref_id = int(parts[3]) if len(parts) > 3 and parts[2] == "ref" else None
+    uid = call.from_user.id
+
+    gw = get_giveaway(gid)
+    if not gw or gw["status"] != "active":
+        bot.answer_callback_query(call.id, "Розыгрыш уже завершён", show_alert=True)
+        return
+
+    channels = json.loads(gw["required_channels"] or "[]")
+    not_subbed = check_subscriptions(uid, channels)
+
+    if not_subbed:
+        names = ", ".join(
+            ch["chat_id"] if ch["chat_id"].startswith("@") else "приватный канал"
+            for ch in not_subbed
+        )
+        bot.answer_callback_query(call.id, f"❌ Ты ещё не подписан на: {names}", show_alert=True)
+        return
+
+    bot.answer_callback_query(call.id, "✅ Подписка подтверждена!")
+
+    if ref_id:
+        confirm_referral(ref_id)
+        bot.edit_message_text(
+            "✅ Приглашение засчитано! Добро пожаловать!",
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id
+        )
+        show_main_menu(call.message.chat.id)
+        return
+
+    # проверка приглашений
+    if gw["invite_count"]:
+        have = confirmed_invites(uid, gid)
+        if have < gw["invite_count"]:
+            bot.edit_message_text(
+                f"✅ Подписка подтверждена.\n\n"
+                f"Но для участия нужно пригласить новых друзей: {have} / {gw['invite_count']}.\n"
+                f"Твоя ссылка: https://t.me/{bot.get_me().username}?start=ref_{uid}_{gid}",
+                chat_id=call.message.chat.id,
+                message_id=call.message.message_id
+            )
+            return
+
+    if is_participant(uid, gid):
+        bot.answer_callback_query(call.id, "Ты уже участвуешь", show_alert=True)
+        return
+
+    add_participant(uid, gid)
+    bot.edit_message_text(
+        "✅ <b>Вы успешно приняли участие в розыгрыше!</b>\n\n"
+        f"🎁 Приз: {gw['prize_text']}\n"
+        f"👥 Победителей: {gw['winners_count']}\n"
+        f"⏰ Итоги: {format_date(gw['end_at'])}\n\n"
+        "Удачи! 🍀",
+        chat_id=call.message.chat.id,
+        message_id=call.message.message_id,
+        parse_mode="HTML"
+    )
+
+def send_invite_prompt(chat_id, gid, uid, have, need):
+    link = f"https://t.me/{bot.get_me().username}?start=ref_{uid}_{gid}"
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(types.InlineKeyboardButton("✅ Проверить приглашения", callback_data=f"checkrefs:{gid}"))
+    bot.send_message(
+        chat_id,
+        f"⚠️ Для участия нужно пригласить новых друзей: {need}\n\n"
+        f"Ты пригласил: {have} / {need}\n\n"
+        f"Твоя персональная ссылка:\n<code>{link}</code>\n\n"
+        f"📌 Как это работает:\n"
+        f"1. Перешли ссылку другу\n"
+        f"2. Друг заходит в бота и проходит капчу\n"
+        f"3. Друг подписывается на каналы розыгрыша\n"
+        f"4. Приглашение засчитывается автоматически",
+        parse_mode="HTML",
+        reply_markup=markup
+    )
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("checkrefs:"))
+def checkrefs_handler(call):
+    gid = int(call.data.split(":")[1])
+    uid = call.from_user.id
+    gw = get_giveaway(gid)
+    if not gw or gw["status"] != "active":
+        bot.answer_callback_query(call.id, "Розыгрыш завершён", show_alert=True)
+        return
+    have = confirmed_invites(uid, gid)
+    if have < gw["invite_count"]:
+        bot.answer_callback_query(call.id, f"❌ Приглашено {have} из {gw['invite_count']}", show_alert=True)
+        return
+    if is_participant(uid, gid):
+        bot.answer_callback_query(call.id, "Ты уже участвуешь", show_alert=True)
+        return
+    add_participant(uid, gid)
+    bot.answer_callback_query(call.id, "✅ Ты в игре!")
+    bot.edit_message_text(
+        "✅ <b>Вы успешно приняли участие в розыгрыше!</b>\n\n"
+        f"🎁 Приз: {gw['prize_text']}\n"
+        f"👥 Победителей: {gw['winners_count']}\n"
+        f"⏰ Итоги: {format_date(gw['end_at'])}\n\nУдачи! 🍀",
+        chat_id=call.message.chat.id,
+        message_id=call.message.message_id,
+        parse_mode="HTML"
+    )
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("myrefs:"))
+def myrefs_handler(call):
+    gid = int(call.data.split(":")[1])
+    uid = call.from_user.id
+    gw = get_giveaway(gid)
+    have = confirmed_invites(uid, gid)
+    link = f"https://t.me/{bot.get_me().username}?start=ref_{uid}_{gid}"
+    bot.answer_callback_query(call.id)
+    bot.send_message(
+        call.message.chat.id,
+        f"🏆 Розыгрыш #{gid}\n"
+        f"Приглашено новых: {have} / {gw['invite_count']}\n\n"
+        f"<code>{link}</code>",
+        parse_mode="HTML"
+    )
+
+@bot.callback_query_handler(func=lambda c: c.data == "menu:refs")
+def menu_refs(call):
+    uid = call.from_user.id
+    cur.execute("""
+        SELECT DISTINCT giveaway_id FROM referrals WHERE inviter_id=?
+    """, (uid,))
+    rows = cur.fetchall()
+    if not rows:
+        bot.answer_callback_query(call.id)
+        bot.send_message(call.message.chat.id, "😔 Ты пока никого не приглашал.")
+        return
+    lines = ["🏆 <b>Твои приглашения:</b>\n"]
+    for (gid,) in rows:
+        gw = get_giveaway(gid)
+        if not gw:
+            continue
+        have = confirmed_invites(uid, gid)
+        link = f"https://t.me/{bot.get_me().username}?start=ref_{uid}_{gid}"
+        lines.append(f"🎉 Розыгрыш #{gid} — {gw['prize_text']}\n"
+                     f"Приглашено новых: {have} / {gw['invite_count']}\n"
+                     f"<code>{link}</code>\n")
+    bot.answer_callback_query(call.id)
+    bot.send_message(call.message.chat.id, "\n".join(lines), parse_mode="HTML")
+
+@bot.callback_query_handler(func=lambda c: c.data == "menu:my")
+def menu_my(call):
+    uid = call.from_user.id
+    cur.execute("""
+        SELECT p.giveaway_id, g.status, g.prize_text
+        FROM participants p JOIN giveaways g ON g.id = p.giveaway_id
+        WHERE p.user_id=?
+        ORDER BY p.giveaway_id DESC
+    """, (uid,))
+    rows = cur.fetchall()
+    if not rows:
+        bot.answer_callback_query(call.id)
+        bot.send_message(call.message.chat.id, "😔 Ты пока не участвовал ни в одном розыгрыше.")
+        return
+    lines = ["📊 <b>Твои участия:</b>\n"]
+    for gid, status, prize in rows:
+        emoji = "🟢" if status == "active" else "⚪"
+        label = "активно" if status == "active" else "завершён"
+        lines.append(f"{emoji} #{gid} — {prize[:40]} — {label}")
+    bot.answer_callback_query(call.id)
+    bot.send_message(call.message.chat.id, "\n".join(lines), parse_mode="HTML")
+
+# ============ АДМИН ============
+drafts = {}  # admin_id -> {step, prize_text, prize_photo, winners_count, channels, invite_count, no_conditions, end_at}
+
+@bot.message_handler(commands=["admin"])
+def admin_cmd(message):
+    if not is_admin(message.from_user.id):
+        return
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        types.InlineKeyboardButton("🎁 Создать розыгрыш", callback_data="adm:create"),
+        types.InlineKeyboardButton("📊 Мои розыгрыши", callback_data="adm:list"),
+    )
+    bot.send_message(message.chat.id, "⚙️ <b>Админ-панель</b>", parse_mode="HTML", reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda c: c.data == "adm:create")
+def adm_create(call):
+    if not is_admin(call.from_user.id):
+        bot.answer_callback_query(call.id, "Нет доступа", show_alert=True)
+        return
+    drafts[call.from_user.id] = {
+        "step": "prize", "prize_text": None, "prize_photo": None,
+        "winners_count": None, "channels": [], "invite_count": 0,
+        "no_conditions": False, "end_at": None
+    }
+    bot.answer_callback_query(call.id)
+    bot.send_message(
+        call.message.chat.id,
+        "📝 <b>Шаг 1 из 6 — Приз</b>\n\n"
+        "Введи приз: ссылку на подарок, название, количество звёзд и т.д.\n\n"
+        "Пример:\nNFT «Роза» из коллекции X — https://t.me/nft/...\n"
+        "или\n100 ⭐ на твой аккаунт",
+        parse_mode="HTML"
+    )
+
+def draft_step_guard(step):
+    def f(message):
+        d = drafts.get(message.from_user.id)
+        return d and d.get("step") == step
+    return f
+
+@bot.message_handler(func=draft_step_guard("prize"))
+def step_prize(message):
+    drafts[message.from_user.id]["prize_text"] = message.text.strip()
+    drafts[message.from_user.id]["step"] = "photo"
+    bot.send_message(
+        message.chat.id,
+        "✅ Приз сохранён.\n\n📷 <b>Шаг 2 из 6 — Фото</b>\n\n"
+        "Пришли фото приза или напиши /skip.",
+        parse_mode="HTML"
+    )
+
+@bot.message_handler(func=draft_step_guard("photo"), content_types=["photo", "text"])
+def step_photo(message):
+    if message.content_type == "photo":
+        drafts[message.from_user.id]["prize_photo"] = message.photo[-1].file_id
+        drafts[message.from_user.id]["step"] = "winners"
+        bot.send_message(message.chat.id, "✅ Фото сохранено.\n\n👥 <b>Шаг 3 из 6 — Победители</b>\n\nСколько победителей? (1–100)", parse_mode="HTML")
+    elif message.text == "/skip":
+        drafts[message.from_user.id]["prize_photo"] = None
+        drafts[message.from_user.id]["step"] = "winners"
+        bot.send_message(message.chat.id, "✅ Без фото.\n\n👥 <b>Шаг 3 из 6 — Победители</b>\n\nСколько победителей? (1–100)", parse_mode="HTML")
+    else:
+        bot.send_message(message.chat.id, "Пришли фото или /skip.")
+
+@bot.message_handler(func=draft_step_guard("winners"))
+def step_winners(message):
+    try:
+        n = int(message.text.strip())
+        assert 1 <= n <= 100
+    except Exception:
+        bot.send_message(message.chat.id, "Нужно целое число от 1 до 100. Попробуй ещё:")
+        return
+    drafts[message.from_user.id]["winners_count"] = n
+    drafts[message.from_user.id]["step"] = "conditions"
+    send_conditions_menu(message.chat.id, message.from_user.id)
+
+def send_conditions_menu(chat_id, admin_id):
+    d = drafts[admin_id]
+    sub_mark = "✅" if d["channels"] else "⬜"
+    inv_mark = "✅" if d["invite_count"] else "⬜"
+    none_mark = "✅" if d["no_conditions"] else "⬜"
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        types.InlineKeyboardButton(f"{sub_mark} Подписка на канал", callback_data="cond:sub"),
+        types.InlineKeyboardButton(f"{inv_mark} Пригласить друзей", callback_data="cond:inv"),
+        types.InlineKeyboardButton(f"{none_mark} Нет условий", callback_data="cond:none"),
+        types.InlineKeyboardButton("➡️ Далее", callback_data="cond:next"),
+    )
+    bot.send_message(chat_id, "📋 <b>Шаг 4 из 6 — Условия участия</b>\n\nВыбери условия (можно несколько):",
+                     parse_mode="HTML", reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("cond:"))
+def cond_handler(call):
+    if not is_admin(call.from_user.id):
+        return
+    d = drafts.get(call.from_user.id)
+    if not d or d["step"] != "conditions":
+        bot.answer_callback_query(call.id, "Сессия истекла, начни заново /admin", show_alert=True)
+        return
+    action = call.data.split(":")[1]
+
+    if action == "sub":
+        d["step"] = "channels_input"
+        bot.answer_callback_query(call.id)
+        bot.send_message(
+            call.message.chat.id,
+            "📢 Пришли каналы, на которые нужно подписаться.\n\n"
+            "Формат:\n@channel1\n@channel2\n\n"
+            "Для приватного канала:\n-1001234567890 | https://t.me/+AbCdEf\n\n"
+            "Каждый канал — с новой строки.\nКогда закончишь — /done",
+        )
+        return
+
+    if action == "inv":
+        d["step"] = "invite_count"
+        bot.answer_callback_query(call.id)
+        bot.send_message(call.message.chat.id, "👥 Сколько новых друзей нужно пригласить? (1–50)")
+        return
+
+    if action == "none":
+        d["no_conditions"] = True
+        d["channels"] = []
+        d["invite_count"] = 0
+        bot.answer_callback_query(call.id, "Условия сброшены")
+        send_conditions_menu(call.message.chat.id, call.from_user.id)
+        return
+
+    if action == "next":
+        if not d["no_conditions"] and not d["channels"] and not d["invite_count"]:
+            bot.answer_callback_query(call.id, "Выбери хотя бы одно условие или «Нет условий»", show_alert=True)
+            return
+        d["step"] = "end_at"
+        bot.answer_callback_query(call.id)
+        bot.send_message(
+            call.message.chat.id,
+            "⏰ <b>Шаг 5 из 6 — Дата итогов</b>\n\n"
+            "Когда подвести итоги?\nФормат: ГГГГ-ММ-ДД ЧЧ:ММ\n\n"
+            "Пример: 2026-06-01 20:00",
+            parse_mode="HTML"
+        )
+
+@bot.message_handler(func=draft_step_guard("channels_input"))
+def step_channels(message):
+    if message.text == "/done":
+        d = drafts[message.from_user.id]
+        if not d["channels"]:
+            bot.send_message(message.chat.id, "Ты не добавил ни одного канала. Пришли хотя бы один или /done после добавления.")
+            return
+        d["step"] = "conditions"
+        bot.send_message(message.chat.id, "✅ Каналы добавлены.")
+        send_conditions_menu(message.chat.id, message.from_user.id)
+        return
+
+    line = message.text.strip()
+    if "|" in line:
+        chat_id, link = [x.strip() for x in line.split("|", 1)]
+        if not link.startswith("https://t.me/"):
+            bot.send_message(message.chat.id, "Ссылка должна начинаться с https://t.me/")
+            return
+        entry = {"chat_id": chat_id, "invite_link": link}
+    else:
+        if not line.startswith("@"):
+            bot.send_message(message.chat.id, "Публичный канал должен начинаться с @")
+            return
+        entry = {"chat_id": line, "invite_link": f"https://t.me/{line[1:]}"}
+
+    # проверка, что бот админ
+    try:
+        me = bot.get_me()
+        m = bot.get_chat_member(entry["chat_id"], me.id)
+        if m.status not in ("administrator", "creator"):
+            bot.send_message(message.chat.id, f"⚠️ Бот не админ в {entry['chat_id']}. Добавь бота в админы, иначе проверка не сработает.")
+    except Exception:
+        bot.send_message(message.chat.id, f"⚠️ Не удалось проверить {entry['chat_id']}. Убедись, что бот добавлен в канал.")
+
+    drafts[message.from_user.id]["channels"].append(entry)
+    bot.send_message(message.chat.id, f"✅ Добавлен {entry['chat_id']}. Пришли следующий или /done")
+
+@bot.message_handler(func=draft_step_guard("invite_count"))
+def step_invite_count(message):
+    try:
+        n = int(message.text.strip())
+        assert 1 <= n <= 50
+    except Exception:
+        bot.send_message(message.chat.id, "Нужно число от 1 до 50. Попробуй ещё:")
+        return
+    drafts[message.from_user.id]["inv
+сделай в отдельных файлах, типа конфиг.ру, майн.ру и тд
+Разбил проект по файлам. Структура:
+
+text
+giveaway_bot/
+├── config.py       # токен, админы, канал, БД
+├── database.py     # подключение, таблицы, запросы
+├── texts.py        # все тексты сообщений
+├── utils.py        # капча, проверки, форматирование
+├── user.py         # меню участника, участие, рефералы
+├── admin.py        # создание розыгрыша (FSM), управление
+├── scheduler.py    # авто-подведение итогов
+└── main.py         # точка входа, регистрация хэндлеров
+config.py
+python
+BOT_TOKEN = "ВСТАВЬ_ТОКЕН"
+ADMINS = [111111111, 222222222]   # два админа
+CHANNEL_ID = "@your_channel"      # канал для публикации
+DB_PATH = "bot.db"
+database.py
+python
+import sqlite3
+from config import DB_PATH
+
+conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+cur = conn.cursor()
+
+def init_db():
+    cur.executescript("""
+    CREATE TABLE IF NOT EXISTS users (
+        user_id INTEGER PRIMARY KEY,
+        username TEXT,
+        verified INTEGER DEFAULT 0,
+        first_seen_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS giveaways (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        status TEXT DEFAULT 'draft',
+        prize_text TEXT,
+        prize_photo TEXT,
+        winners_count INTEGER,
+        required_channels TEXT,
+        invite_count INTEGER DEFAULT 0,
+        no_conditions INTEGER DEFAULT 0,
+        end_at TEXT,
+        channel_id TEXT,
+        message_id INTEGER
+    );
+    CREATE TABLE IF NOT EXISTS participants (
+        user_id INTEGER NOT NULL,
+        giveaway_id INTEGER NOT NULL,
+        joined_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (user_id, giveaway_id)
+    );
+    CREATE TABLE IF NOT EXISTS referrals (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        giveaway_id INTEGER NOT NULL,
+        inviter_id INTEGER NOT NULL,
+        invited_id INTEGER NOT NULL,
+        is_new_user INTEGER DEFAULT 1,
+        status TEXT DEFAULT 'pending',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        confirmed_at TEXT,
+        UNIQUE(giveaway_id, invited_id)
+    );
+    """)
+    conn.commit()
+
+def is_verified(uid):
+    cur.execute("SELECT verified FROM users WHERE user_id=?", (uid,))
+    r = cur.fetchone()
+    return bool(r and r[0])
+
+def ensure_user(uid, username=""):
+    cur.execute("INSERT OR IGNORE INTO users (user_id, username) VALUES (?,?)", (uid, username))
+    conn.commit()
+
+def user_exists(uid):
+    cur.execute("SELECT 1 FROM users WHERE user_id=?", (uid,))
+    return cur.fetchone() is not None
+
+def mark_verified(uid):
+    cur.execute("UPDATE users SET verified=1 WHERE user_id=?", (uid,))
+    conn.commit()
+
+def get_giveaway(gid):
+    cur.execute("SELECT * FROM giveaways WHERE id=?", (gid,))
+    row = cur.fetchone()
+    if not row:
+        return None
+    cols = [d[0] for d in cur.description]
+    return dict(zip(cols, row))
+
+def get_active_giveaways():
+    cur.execute("SELECT id, prize_text FROM giveaways WHERE status='active'")
+    return cur.fetchall()
+
+def is_participant(uid, gid):
+    cur.execute("SELECT 1 FROM participants WHERE user_id=? AND giveaway_id=?", (uid, gid))
+    return cur.fetchone() is not None
+
+def add_participant(uid, gid):
+    cur.execute("INSERT OR IGNORE INTO participants (user_id, giveaway_id) VALUES (?,?)", (uid, gid))
+    conn.commit()
+
+def confirmed_invites(uid, gid):
+    cur.execute("""
+        SELECT COUNT(*) FROM referrals
+        WHERE inviter_id=? AND giveaway_id=? AND status='confirmed' AND is_new_user=1
+    """, (uid, gid))
+    return cur.fetchone()[0]
+
+def confirm_referral(ref_id):
+    from datetime import datetime
+    cur.execute(
+        "UPDATE referrals SET status='confirmed', confirmed_at=? WHERE id=?",
+        (datetime.now().isoformat(), ref_id)
+    )
+    conn.commit()
+texts.py
+python
+from datetime import datetime
+
+def format_date(iso):
+    try:
+        return datetime.fromisoformat(iso).strftime("%d.%m.%Y %H:%M")
+    except Exception:
+        return iso
+
+# --- Капча ---
+CAPTCHA = "🧮 <b>Реши пример, чтобы продолжить:</b>\n\n<b>{a} + {b} = ?</b>"
+CAPTCHA_OK = "✅ Капча пройдена. Добро пожаловать!"
+CAPTCHA_FAIL = "❌ Неверно, попробуй ещё раз"
+
+# --- Меню ---
+MAIN_MENU = "👋 Привет! Ты в боте розыгрышей."
+NO_ACTIVE = "😔 Сейчас нет активных розыгрышей. Загляни позже!"
+NO_REFS = "😔 Ты пока никого не приглашал."
+NO_PARTICIPATIONS = "😔 Ты пока не участвовал ни в одном розыгрыше."
+
+# --- Участие ---
+JOIN_OK = (
+    "✅ <b>Вы успешно приняли участие в розыгрыше!</b>\n\n"
+    "🎁 Приз: {prize}\n"
+    "👥 Победителей: {winners}\n"
+    "⏰ Итоги: {end_at}\n\n"
+    "Удачи! 🍀"
+)
+JOIN_ALREADY = "Ты уже участвуешь"
+JOIN_NOT_ACTIVE = "Розыгрыш уже завершён"
+JOIN_NEED_CAPTCHA = "Сначала пройди капчу: /start"
+
+# --- Подписка ---
+SUB_PROMPT = (
+    "⚠️ <b>Для участия в розыгрыше необходимо подписаться на каналы:</b>\n\n"
+    "{channels}\n\n"
+    "После подписки нажми «✅ Проверить подписку»."
+)
+SUB_FAIL = "❌ Ты ещё не подписан на: {names}"
+SUB_OK = "✅ Подписка подтверждена!"
+SUB_CONFIRMED_REF = "✅ Приглашение засчитано! Добро пожаловать!"
+
+# --- Приглашения ---
+INVITE_PROMPT = (
+    "⚠️ Для участия нужно пригласить новых друзей: {need}\n\n"
+    "Ты пригласил: {have} / {need}\n\n"
+    "Твоя персональная ссылка:\n<code>{link}</code>\n\n"
+    "📌 Как это работает:\n"
+    "1. Перешли ссылку другу\n"
+    "2. Друг заходит в бота и проходит капчу\n"
+    "3. Друг подписывается на каналы розыгрыша\n"
+    "4. Приглашение засчитывается автоматически"
+)
+INVITE_FAIL = "❌ Приглашено {have} из {need}"
+
+# --- Админ ---
+ADMIN_PANEL = "⚙️ <b>Админ-панель</b>"
+ADMIN_NO_ACCESS = "Нет доступа"
+ADMIN_STEP_PRIZE = (
+    "📝 <b>Шаг 1 из 6 — Приз</b>\n\n"
+    "Введи приз: ссылку на подарок, название, количество звёзд и т.д.\n\n"
+    "Пример:\nNFT «Роза» из коллекции X — https://t.me/nft/...\n"
+    "или\n100 ⭐ на твой аккаунт"
+)
+ADMIN_STEP_PHOTO = "✅ Приз сохранён.\n\n📷 <b>Шаг 2 из 6 — Фото</b>\n\nПришли фото приза или напиши /skip."
+ADMIN_PHOTO_OK = "✅ Фото сохранено.\n\n👥 <b>Шаг 3 из 6 — Победители</b>\n\nСколько победителей? (1–100)"
+ADMIN_PHOTO_SKIP = "✅ Без фото.\n\n👥 <b>Шаг 3 из 6 — Победители</b>\n\nСколько победителей? (1–100)"
+ADMIN_WINNERS_BAD = "Нужно целое число от 1 до 100. Попробуй ещё:"
+ADMIN_CONDITIONS = "📋 <b>Шаг 4 из 6 — Условия участия</b>\n\nВыбери условия (можно несколько):"
+ADMIN_CHANNELS_INPUT = (
+    "📢 Пришли каналы, на которые нужно подписаться.\n\n"
+    "Формат:\n@channel1\n@channel2\n\n"
+    "Для приватного канала:\n-1001234567890 | https://t.me/+AbCdEf\n\n"
+    "Каждый канал — с новой строки.\nКогда закончишь — /done"
+)
+ADMIN_INVITE_COUNT = "👥 Сколько новых друзей нужно пригласить? (1–50)"
+ADMIN_INVITE_BAD = "Нужно число от 1 до 50. Попробуй ещё:"
+ADMIN_END_AT = (
+    "⏰ <b>Шаг 5 из 6 — Дата итогов</b>\n\n"
+    "Когда подвести итоги?\nФормат: ГГГГ-ММ-ДД ЧЧ:ММ\n\n"
+    "Пример: 2026-06-01 20:00"
+)
+ADMIN_END_AT_BAD = "❌ Неверный формат. Пример: 2026-06-01 20:00"
+ADMIN_END_AT_PAST = "❌ Дата должна быть в будущем."
+ADMIN_PREVIEW = "👀 Проверь пост выше.\n\n[✅ Опубликовать] [✏️ Изменить] [❌ Отмена]"
+ADMIN_PUBLISHED = "✅ Розыгрыш #{gid} опубликован в канале!"
+ADMIN_NEED_CONDITION = "Выбери хотя бы одно условие или «Нет условий»"
+ADMIN_SESSION_EXPIRED = "Сессия истекла, начни заново /admin"
+utils.py
+python
+import random
+import json
+from telebot import types
+from database import (
+    cur, conn, is_verified, user_exists, ensure_user,
+    mark_verified, get_giveaway, is_participant, add_participant,
+    confirmed_invites, confirm_referral
+)
+
+def build_captcha_markup(correct, options):
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(*[
+        types.InlineKeyboardButton(str(o), callback_data=f"cap:{correct}:{o}")
+        for o in options
+    ])
+    return markup
+
+def check_subscriptions(bot, uid, channels):
+    not_subbed = []
+    for ch in channels:
+        try:
+            m = bot.get_chat_member(ch["chat_id"], uid)
+            if m.status not in ("creator", "administrator", "member"):
+                not_subbed.append(ch)
+        except Exception:
+            not_subbed.append(ch)
+    return not_subbed
+
+def channel_label(ch):
+    return ch["chat_id"] if ch["chat_id"].startswith("@") else "Приватный канал"
+
+def build_conditions_lines(gw):
+    channels = json.loads(gw["required_channels"] or "[]")
+    lines = []
+    if channels:
+        lines.append("• Подписка: " + ", ".join(channel_label(ch) for ch in channels))
+    if gw["invite_count"]:
+        lines.append(f"• Пригласить друзей: {gw['invite_count']}")
+    if not lines:
+        lines.append("• Нет условий")
+    return lines
+
+def referral_link(bot, uid, gid):
+    return f"https://t.me/{bot.get_me().username}?start=ref_{uid}_{gid}"
+user.py
+python
+import json
+from telebot import types
+from database import (
+    cur, conn, is_verified, user_exists, ensure_user, mark_verified,
+    get_giveaway, get_active_giveaways, is_participant, add_participant,
+    confirmed_invites, confirm_referral
+)
+from utils import (
+    build_captcha_markup, check_subscriptions, channel_label,
+    build_conditions_lines, referral_link
+)
+import texts
+
+def register(bot):
+
+    def show_main_menu(chat_id):
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        markup.add(
+            types.InlineKeyboardButton("🎁 Активные розыгрыши", callback_data="menu:active"),
+            types.InlineKeyboardButton("🏆 Мои приглашения", callback_data="menu:refs"),
+            types.InlineKeyboardButton("📊 Мои участия", callback_data="menu:my"),
+        )
+        bot.send_message(chat_id, texts.MAIN_MENU, reply_markup=markup)
+
+    @bot.message_handler(commands=["start"])
+    def start_cmd(message):
+        uid = message.from_user.id
+        args = message.text.split(maxsplit=1)
+        payload = args[1] if len(args) > 1 else None
+
+        is_new = not user_exists(uid)
+        ensure_user(uid, message.from_user.username or "")
+
+        if payload and payload.startswith("ref_"):
+            try:
+                _, inviter_id, giveaway_id = payload.split("_")
+                inviter_id, giveaway_id = int(inviter_id), int(giveaway_id)
+                if inviter_id == uid:
+                    bot.send_message(message.chat.id, "Нельзя пригласить самого себя.")
+                elif not is_new:
+                    bot.send_message(
+                        message.chat.id,
+                        "👋 Ты уже зарегистрирован в боте раньше.\n"
+                        "Приглашение не будет засчитано как «новый друг»."
+                    )
+                else:
+                    cur.execute(
+                        "INSERT OR IGNORE INTO referrals (giveaway_id, inviter_id, invited_id, is_new_user) VALUES (?,?,?,1)",
+                        (giveaway_id, inviter_id, uid)
+                    )
+                    conn.commit()
+            except ValueError:
+                pass
+
+        if not is_verified(uid):
+            a, b = __import__("random").randint(1, 10), __import__("random").randint(1, 10)
+            correct = a + b
+            wrong = set()
+            while len(wrong) < 3:
+                w = __import__("random").randint(2, 20)
+                if w != correct:
+                    wrong.add(w)
+            options = list(wrong) + [correct]
+            __import__("random").shuffle(options)
+            bot.send_message(
+                message.chat.id,
+                texts.CAPTCHA.format(a=a, b=b),
+                parse_mode="HTML",
+                reply_markup=build_captcha_markup(correct, options)
+            )
+            return
+
+        if try_confirm_pending_referral(message.chat.id, uid):
+            return
+
+        show_main_menu(message.chat.id)
+
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("cap:"))
+    def cap_handler(call):
+        _, correct, chosen = call.data.split(":")
+        if int(chosen) == int(correct):
+            mark_verified(call.from_user.id)
+            bot.answer_callback_query(call.id, "✅ Верно!")
+            bot.edit_message_text(
+                texts.CAPTCHA_OK,
+                chat_id=call.message.chat.id,
+                message_id=call.message.message_id
+            )
+            show_main_menu(call.message.chat.id)
+            try_confirm_pending_referral(call.message.chat.id, call.from_user.id)
+        else:
+            bot.answer_callback_query(call.id, texts.CAPTCHA_FAIL, show_alert=True)
+
+    def try_confirm_pending_referral(chat_id, uid):
+        cur.execute("""
+            SELECT id, giveaway_id FROM referrals
+            WHERE invited_id=? AND status='pending'
+            ORDER BY id DESC LIMIT 1
+        """, (uid,))
+        row = cur.fetchone()
+        if not row:
+            return False
+        ref_id, gid = row
+        gw = get_giveaway(gid)
+        if not gw or gw["status"] != "active":
+            return False
+
+        channels = json.loads(gw["required_channels"] or "[]")
+        if not channels:
+            confirm_referral(ref_id)
+            bot.send_message(chat_id, texts.SUB_CONFIRMED_REF)
+            return True
+
+        not_subbed = check_subscriptions(bot, uid, channels)
+        if not_subbed:
+            send_sub_prompt(chat_id, gid, not_subbed, ref_id=ref_id)
+            return True
+
+        confirm_referral(ref_id)
+        bot.send_message(chat_id, texts.SUB_CONFIRMED_REF)
+        return True
+
+    def send_sub_prompt(chat_id, gid, not_subbed, ref_id=None):
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        for ch in not_subbed:
+            markup.add(types.InlineKeyboardButton(f"📢 {channel_label(ch)}", url=ch["invite_link"]))
+        cb = f"checksub:{gid}" + (f":ref:{ref_id}" if ref_id else "")
+        markup.add(types.InlineKeyboardButton("✅ Проверить подписку", callback_data=cb))
+        bot.send_message(
+            chat_id,
+            texts.SUB_PROMPT.format(channels="\n".join(f"• {channel_label(ch)}" for ch in not_subbed)),
+            parse_mode="HTML",
+            reply_markup=markup
+        )
+
+    @bot.callback_query_handler(func=lambda c: c.data == "menu:active")
+    def menu_active(call):
+        rows = get_active_giveaways()
+        if not rows:
+            bot.answer_callback_query(call.id)
+            bot.send_message(call.message.chat.id, texts.NO_ACTIVE)
+            return
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        for gid, prize in rows:
+            markup.add(types.InlineKeyboardButton(f"#{gid} — {prize[:40]}", callback_data=f"gw:{gid}"))
+        bot.answer_callback_query(call.id)
+        bot.send_message(call.message.chat.id, "🎁 Активные розыгрыши:", reply_markup=markup)
+
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("gw:"))
+    def show_giveaway(call):
+        gid = int(call.data.split(":")[1])
+        gw = get_giveaway(gid)
+        if not gw:
+            bot.answer_callback_query(call.id, "Розыгрыш не найден", show_alert=True)
+            return
+        cond_lines = build_conditions_lines(gw)
+        text = (
+            f"🎁 <b>Розыгрыш #{gid}: {gw['prize_text']}</b>\n\n"
+            f"<b>Условия участия:</b>\n" + "\n".join(cond_lines) + "\n\n"
+            f"👥 Победителей: {gw['winners_count']}\n"
+            f"⏰ Итоги: {texts.format_date(gw['end_at'])}"
+        )
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        markup.add(types.InlineKeyboardButton("🎉 Участвовать", callback_data=f"join:{gid}"))
+        if gw["invite_count"]:
+            markup.add(types.InlineKeyboardButton("📋 Мои приглашения", callback_data=f"myrefs:{gid}"))
+        bot.answer_callback_query(call.id)
+        if gw["prize_photo"]:
+            bot.send_photo(call.message.chat.id, gw["prize_photo"], caption=text,
+                           parse_mode="HTML", reply_markup=markup)
+        else:
+            bot.send_message(call.message.chat.id, text, parse_mode="HTML", reply_markup=markup)
+
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("join:"))
+    def join_handler(call):
+        gid = int(call.data.split(":")[1])
+        uid = call.from_user.id
+        if not is_verified(uid):
+            bot.answer_callback_query(call.id, texts.JOIN_NEED_CAPTCHA, show_alert=True)
+            return
+        gw = get_giveaway(gid)
+        if not gw or gw["status"] != "active":
+            bot.answer_callback_query(call.id, texts.JOIN_NOT_ACTIVE, show_alert=True)
+            return
+        if is_participant(uid, gid):
+            bot.answer_callback_query(call.id, texts.JOIN_ALREADY, show_alert=True)
+            return
+        channels = json.loads(gw["required_channels"] or "[]")
+        not_subbed = check_subscriptions(bot, uid, channels) if channels else []
+        if not_subbed:
+            send_sub_prompt(call.message.chat.id, gid, not_subbed)
+            bot.answer_callback_query(call.id)
+            return
+        if gw["invite_count"]:
+            have = confirmed_invites(uid, gid)
+            if have < gw["invite_count"]:
+                send_invite_prompt(call.message.chat.id, gid, uid, have, gw["invite_count"])
+                bot.answer_callback_query(call.id)
+                return
+        add_participant(uid, gid)
+        bot.answer_callback_query(call.id, "✅ Ты в игре!")
+        bot.edit_message_text(
+            texts.JOIN_OK.format(
+                prize=gw["prize_text"], winners=gw["winners_count"],
+                end_at=texts.format_date(gw["end_at"])
+            ),
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            parse_mode="HTML"
+        )
+
+    def send_invite_prompt(chat_id, gid, uid, have, need):
+        link = referral_link(bot, uid, gid)
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        markup.add(types.InlineKeyboardButton("✅ Проверить приглашения", callback_data=f"checkrefs:{gid}"))
+        bot.send_message(
+            chat_id,
+            texts.INVITE_PROMPT.format(need=need, have=have, link=link),
+            parse_mode="HTML",
+            reply_markup=markup
+        )
+
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("checksub:"))
+    def checksub_handler(call):
+        parts = call.data.split(":")
+        gid = int(parts[1])
+        ref_id = int(parts[3]) if len(parts) > 3 and parts[2] == "ref" else None
+        uid = call.from_user.id
+        gw = get_giveaway(gid)
+        if not gw or gw["status"] != "active":
+            bot.answer_callback_query(call.id, texts.JOIN_NOT_ACTIVE, show_alert=True)
+            return
+        channels = json.loads(gw["required_channels"] or "[]")
+        not_subbed = check_subscriptions(bot, uid, channels)
+        if not_subbed:
+            names = ", ".join(channel_label(ch) for ch in not_subbed)
+            bot.answer_callback_query(call.id, texts.SUB_FAIL.format(names=names), show_alert=True)
+            return
+        bot.answer_callback_query(call.id, texts.SUB_OK)
+        if ref_id:
+            confirm_referral(ref_id)
+            bot.edit_message_text(
+                texts.SUB_CONFIRMED_REF,
+                chat_id=call.message.chat.id,
+                message_id=call.message.message_id
+            )
+            show_main_menu(call.message.chat.id)
+            return
+        if gw["invite_count"]:
+            have = confirmed_invites(uid, gid)
+            if have < gw["invite_count"]:
+                bot.edit_message_text(
+                    f"✅ Подписка подтверждена.\n\n"
+                    f"Но для участия нужно пригласить новых друзей: {have} / {gw['invite_count']}.\n"
+                    f"Твоя ссылка: {referral_link(bot, uid, gid)}",
+                    chat_id=call.message.chat.id,
+                    message_id=call.message.message_id
+                )
+                return
+        if is_participant(uid, gid):
+            bot.answer_callback_query(call.id, texts.JOIN_ALREADY, show_alert=True)
+            return
+        add_participant(uid, gid)
+        bot.edit_message_text(
+            texts.JOIN_OK.format(
+                prize=gw["prize_text"], winners=gw["winners_count"],
+                end_at=texts.format_date(gw["end_at"])
+            ),
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            parse_mode="HTML"
+        )
+
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("checkrefs:"))
+    def checkrefs_handler(call):
+        gid = int(call.data.split(":")[1])
+        uid = call.from_user.id
+        gw = get_giveaway(gid)
+        if not gw or gw["status"] != "active":
+            bot.answer_callback_query(call.id, texts.JOIN_NOT_ACTIVE, show_alert=True)
+            return
+        have = confirmed_invites(uid, gid)
+        if have < gw["invite_count"]:
+            bot.answer_callback_query(call.id, texts.INVITE_FAIL.format(have=have, need=gw["invite_count"]), show_alert=True)
+            return
+        if is_participant(uid, gid):
+            bot.answer_callback_query(call.id, texts.JOIN_ALREADY, show_alert=True)
+            return
+        add_participant(uid, gid)
+        bot.answer_callback_query(call.id, "✅ Ты в игре!")
+        bot.edit_message_text(
+            texts.JOIN_OK.format(
+                prize=gw["prize_text"], winners=gw["winners_count"],
+                end_at=texts.format_date(gw["end_at"])
+            ),
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            parse_mode="HTML"
+        )
+
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("myrefs:"))
+    def myrefs_handler(call):
+        gid = int(call.data.split(":")[1])
+        uid = call.from_user.id
+        gw = get_giveaway(gid)
+        have = confirmed_invites(uid, gid)
+        bot.answer_callback_query(call.id)
+        bot.send_message(
+            call.message.chat.id,
+            f"🏆 Розыгрыш #{gid}\n"
+            f"Приглашено новых: {have} / {gw['invite_count']}\n\n"
+            f"<code>{referral_link(bot, uid, gid)}</code>",
+            parse_mode="HTML"
+        )
+
+    @bot.callback_query_handler(func=lambda c: c.data == "menu:refs")
+    def menu_refs(call):
+        uid = call.from_user.id
+        cur.execute("SELECT DISTINCT giveaway_id FROM referrals WHERE inviter_id=?", (uid,))
+        rows = cur.fetchall()
+        if not rows:
+            bot.answer_callback_query(call.id)
+            bot.send_message(call.message.chat.id, texts.NO_REFS)
+            return
+        lines = ["🏆 <b>Твои приглашения:</b>\n"]
+        for (gid,) in rows:
+            gw = get_giveaway(gid)
+            if not gw:
+                continue
+            have = confirmed_invites(uid, gid)
+            lines.append(
+                f"🎉 Розыгрыш #{gid} — {gw['prize_text']}\n"
+                f"Приглашено новых: {have} / {gw['invite_count']}\n"
+                f"<code>{referral_link(bot, uid, gid)}</code>\n"
+            )
+        bot.answer_callback_query(call.id)
+        bot.send_message(call.message.chat.id, "\n".join(lines), parse_mode="HTML")
+
+    @bot.callback_query_handler(func=lambda c: c.data == "menu:my")
+    def menu_my(call):
+        uid = call.from_user.id
+        cur.execute("""
+            SELECT p.giveaway_id, g.status, g.prize_text
+            FROM participants p JOIN giveaways g ON g.id = p.giveaway_id
+            WHERE p.user_id=? ORDER BY p.giveaway_id DESC
+        """, (uid,))
+        rows = cur.fetchall()
+        if not rows:
+            bot.answer_callback_query(call.id)
+            bot.send_message(call.message.chat.id, texts.NO_PARTICIPATIONS)
+            return
+        lines = ["📊 <b>Твои участия:</b>\n"]
+        for gid, status, prize in rows:
+            emoji = "🟢" if status == "active" else "⚪"
+            label = "активно" if status == "active" else "завершён"
+            lines.append(f"{emoji} #{gid} — {prize[:40]} — {label}")
+        bot.answer_callback_query(call.id)
+        bot.send_message(call.message.chat.id, "\n".join(lines), parse_mode="HTML")
+
+    return show_main_menu
+admin.py
+python
+import json
+from datetime import datetime
+from telebot import types
+from config import ADMINS, CHANNEL_ID
+from database import cur, conn, get_giveaway
+import texts
+
+drafts = {}
+
+def register(bot):
+
+    def is_admin(uid):
+        return uid in ADMINS
+
+    @bot.message_handler(commands=["admin"])
+    def admin_cmd(message):
+        if not is_admin(message.from_user.id):
+            return
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        markup.add(
+            types.InlineKeyboardButton("🎁 Создать розыгрыш", callback_data="adm:create"),
+            types.InlineKeyboardButton("📊 Мои розыгрыши", callback_data="adm:list"),
+        )
+        bot.send_message(message.chat.id, texts.ADMIN_PANEL, parse_mode="HTML", reply_markup=markup)
+
+    @bot.callback_query_handler(func=lambda c: c.data == "adm:create")
+    def adm_create(call):
+        if not is_admin(call.from_user.id):
+            bot.answer_callback_query(call.id, texts.ADMIN_NO_ACCESS, show_alert=True)
+            return
+        drafts[call.from_user.id] = {
+            "step": "prize", "prize_text": None, "prize_photo": None,
+            "winners_count": None, "channels": [], "invite_count": 0,
+            "no_conditions": False, "end_at": None
+        }
+        bot.answer_callback_query(call.id)
+        bot.send_message(call.message.chat.id, texts.ADMIN_STEP_PRIZE, parse_mode="HTML")
+
+    def guard(step):
+        def f(message):
+            d = drafts.get(message.from_user.id)
+            return d and d.get("step") == step
+        return f
+
+    @bot.message_handler(func=guard("prize"))
+    def step_prize(message):
+        drafts[message.from_user.id]["prize_text"] = message.text.strip()
+        drafts[message.from_user.id]["step"] = "photo"
+        bot.send_message(message.chat.id, texts.ADMIN_STEP_PHOTO, parse_mode="HTML")
+
+    @bot.message_handler(func=guard("photo"), content_types=["photo", "text"])
+    def step_photo(message):
+        if message.content_type == "photo":
+            drafts[message.from_user.id]["prize_photo"] = message.photo[-1].file_id
+            drafts[message.from_user.id]["step"] = "winners"
+            bot.send_message(message.chat.id, texts.ADMIN_PHOTO_OK, parse_mode="HTML")
+        elif message.text == "/skip":
+            drafts[message.from_user.id]["prize_photo"] = None
+            drafts[message.from_user.id]["step"] = "winners"
+            bot.send_message(message.chat.id, texts.ADMIN_PHOTO_SKIP, parse_mode="HTML")
+        else:
+            bot.send_message(message.chat.id, "Пришли фото или /skip.")
+
+    @bot.message_handler(func=guard("winners"))
+    def step_winners(message):
+        try:
+            n = int(message.text.strip())
+            assert 1 <= n <= 100
+        except Exception:
+            bot.send_message(message.chat.id, texts.ADMIN_WINNERS_BAD)
+            return
+        drafts[message.from_user.id]["winners_count"] = n
+        drafts[message.from_user.id]["step"] = "conditions"
+        send_conditions_menu(message.chat.id, message.from_user.id)
+
+    def send_conditions_menu(chat_id, admin_id):
+        d = drafts[admin_id]
+        sub_mark = "✅" if d["channels"] else "⬜"
+        inv_mark = "✅" if d["invite_count"] else "⬜"
+        none_mark = "✅" if d["no_conditions"] else "⬜"
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        markup.add(
+            types.InlineKeyboardButton(f"{sub_mark} Подписка на канал", callback_data="cond:sub"),
+            types.InlineKeyboardButton(f"{inv_mark} Пригласить друзей", callback_data="cond:inv"),
+            types.InlineKeyboardButton(f"{none_mark} Нет условий", callback_data="cond:none"),
+            types.InlineKeyboardButton("➡️ Далее", callback_data="cond:next"),
+        )
+        bot.send_message(chat_id, texts.ADMIN_CONDITIONS, parse_mode="HTML", reply_markup=markup)
+
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("cond:"))
+    def cond_handler(call):
+        if not is_admin(call.from_user.id):
+            return
+        d = drafts.get(call.from_user.id)
+        if not d or d["step"] != "conditions":
+            bot.answer_callback_query(call.id, texts.ADMIN_SESSION_EXPIRED, show_alert=True)
+            return
+        action = call.data.split(":")[1]
+        if action == "sub":
+            d["step"] = "channels_input"
+            bot.answer_callback_query(call.id)
+            bot.send_message(call.message.chat.id, texts.ADMIN_CHANNELS_INPUT)
+        elif action == "inv":
+            d["step"] = "invite_count"
+            bot.answer_callback_query(call.id)
+            bot.send_message(call.message.chat.id, texts.ADMIN_INVITE_COUNT)
+        elif action == "none":
+            d["no_conditions"] = True
+            d["channels"] = []
+            d["invite_count"] = 0
+            bot.answer_callback_query(call.id, "Условия сброшены")
+            send_conditions_menu(call.message.chat.id, call.from_user.id)
+        elif action == "next":
+            if not d["no_conditions"] and not d["channels"] and not d["invite_count"]:
+                bot.answer_callback_query(call.id, texts.ADMIN_NEED_CONDITION, show_alert=True)
+                return
+            d["step"] = "end_at"
+            bot.answer_callback_query(call.id)
+            bot.send_message(call.message.chat.id, texts.ADMIN_END_AT, parse_mode="HTML")
+
+    @bot.message_handler(func=guard("channels_input"))
+    def step_channels(message):
+        if message.text == "/done":
+            d = drafts[message.from_user.id]
+скинь еще раз, начиная с admin.py
+Продолжаю с admin.py (начало файла) и до конца проекта.
+
+admin.py
+python
+import json
+from datetime import datetime
+from telebot import types
+from config import ADMINS, CHANNEL_ID
+from database import cur, conn, get_giveaway
+import texts
+
+drafts = {}
+
+def register(bot):
+
+    def is_admin(uid):
+        return uid in ADMINS
+
+    @bot.message_handler(commands=["admin"])
+    def admin_cmd(message):
+        if not is_admin(message.from_user.id):
+            return
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        markup.add(
+            types.InlineKeyboardButton("🎁 Создать розыгрыш", callback_data="adm:create"),
+            types.InlineKeyboardButton("📊 Мои розыгрыши", callback_data="adm:list"),
+        )
+        bot.send_message(message.chat.id, texts.ADMIN_PANEL, parse_mode="HTML", reply_markup=markup)
+
+    @bot.callback_query_handler(func=lambda c: c.data == "adm:create")
+    def adm_create(call):
+        if not is_admin(call.from_user.id):
+            bot.answer_callback_query(call.id, texts.ADMIN_NO_ACCESS, show_alert=True)
+            return
+        drafts[call.from_user.id] = {
+            "step": "prize", "prize_text": None, "prize_photo": None,
+            "winners_count": None, "channels": [], "invite_count": 0,
+            "no_conditions": False, "end_at": None
+        }
+        bot.answer_callback_query(call.id)
+        bot.send_message(call.message.chat.id, texts.ADMIN_STEP_PRIZE, parse_mode="HTML")
+
+    def guard(step):
+        def f(message):
+            d = drafts.get(message.from_user.id)
+            return d and d.get("step") == step
+        return f
+
+    @bot.message_handler(func=guard("prize"))
+    def step_prize(message):
+        drafts[message.from_user.id]["prize_text"] = message.text.strip()
+        drafts[message.from_user.id]["step"] = "photo"
+        bot.send_message(message.chat.id, texts.ADMIN_STEP_PHOTO, parse_mode="HTML")
+
+    @bot.message_handler(func=guard("photo"), content_types=["photo", "text"])
+    def step_photo(message):
+        if message.content_type == "photo":
+            drafts[message.from_user.id]["prize_photo"] = message.photo[-1].file_id
+            drafts[message.from_user.id]["step"] = "winners"
+            bot.send_message(message.chat.id, texts.ADMIN_PHOTO_OK, parse_mode="HTML")
+        elif message.text == "/skip":
+            drafts[message.from_user.id]["prize_photo"] = None
+            drafts[message.from_user.id]["step"] = "winners"
+            bot.send_message(message.chat.id, texts.ADMIN_PHOTO_SKIP, parse_mode="HTML")
+        else:
+            bot.send_message(message.chat.id, "Пришли фото или /skip.")
+
+    @bot.message_handler(func=guard("winners"))
+    def step_winners(message):
+        try:
+            n = int(message.text.strip())
+            assert 1 <= n <= 100
+        except Exception:
+            bot.send_message(message.chat.id, texts.ADMIN_WINNERS_BAD)
+            return
+        drafts[message.from_user.id]["winners_count"] = n
+        drafts[message.from_user.id]["step"] = "conditions"
+        send_conditions_menu(message.chat.id, message.from_user.id)
+
+    def send_conditions_menu(chat_id, admin_id):
+        d = drafts[admin_id]
+        sub_mark = "✅" if d["channels"] else "⬜"
+        inv_mark = "✅" if d["invite_count"] else "⬜"
+        none_mark = "✅" if d["no_conditions"] else "⬜"
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        markup.add(
+            types.InlineKeyboardButton(f"{sub_mark} Подписка на канал", callback_data="cond:sub"),
+            types.InlineKeyboardButton(f"{inv_mark} Пригласить друзей", callback_data="cond:inv"),
+            types.InlineKeyboardButton(f"{none_mark} Нет условий", callback_data="cond:none"),
+            types.InlineKeyboardButton("➡️ Далее", callback_data="cond:next"),
+        )
+        bot.send_message(chat_id, texts.ADMIN_CONDITIONS, parse_mode="HTML", reply_markup=markup)
+
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("cond:"))
+    def cond_handler(call):
+        if not is_admin(call.from_user.id):
+            return
+        d = drafts.get(call.from_user.id)
+        if not d or d["step"] != "conditions":
+            bot.answer_callback_query(call.id, texts.ADMIN_SESSION_EXPIRED, show_alert=True)
+            return
+        action = call.data.split(":")[1]
+        if action == "sub":
+            d["step"] = "channels_input"
+            bot.answer_callback_query(call.id)
+            bot.send_message(call.message.chat.id, texts.ADMIN_CHANNELS_INPUT)
+        elif action == "inv":
+            d["step"] = "invite_count"
+            bot.answer_callback_query(call.id)
+            bot.send_message(call.message.chat.id, texts.ADMIN_INVITE_COUNT)
+        elif action == "none":
+            d["no_conditions"] = True
+            d["channels"] = []
+            d["invite_count"] = 0
+            bot.answer_callback_query(call.id, "Условия сброшены")
+            send_conditions_menu(call.message.chat.id, call.from_user.id)
+        elif action == "next":
+            if not d["no_conditions"] and not d["channels"] and not d["invite_count"]:
+                bot.answer_callback_query(call.id, texts.ADMIN_NEED_CONDITION, show_alert=True)
+                return
+            d["step"] = "end_at"
+            bot.answer_callback_query(call.id)
+            bot.send_message(call.message.chat.id, texts.ADMIN_END_AT, parse_mode="HTML")
+
+    @bot.message_handler(func=guard("channels_input"))
+    def step_channels(message):
+        if message.text == "/done":
+            d = drafts[message.from_user.id]
+            if not d["channels"]:
+                bot.send_message(message.chat.id, "Ты не добавил ни одного канала. Пришли хотя бы один или /done после добавления.")
+                return
+            d["step"] = "conditions"
+            bot.send_message(message.chat.id, "✅ Каналы добавлены.")
+            send_conditions_menu(message.chat.id, message.from_user.id)
+            return
+
+        line = message.text.strip()
+        if "|" in line:
+            chat_id, link = [x.strip() for x in line.split("|", 1)]
+            if not link.startswith("https://t.me/"):
+                bot.send_message(message.chat.id, "Ссылка должна начинаться с https://t.me/")
+                return
+            entry = {"chat_id": chat_id, "invite_link": link}
+        else:
+            if not line.startswith("@"):
+                bot.send_message(message.chat.id, "Публичный канал должен начинаться с @")
+                return
+            entry = {"chat_id": line, "invite_link": f"https://t.me/{line[1:]}"}
+
+        try:
+            me = bot.get_me()
+            m = bot.get_chat_member(entry["chat_id"], me.id)
+            if m.status not in ("administrator", "creator"):
+                bot.send_message(message.chat.id, f"⚠️ Бот не админ в {entry['chat_id']}. Добавь бота в админы, иначе проверка не сработает.")
+        except Exception:
+            bot.send_message(message.chat.id, f"⚠️ Не удалось проверить {entry['chat_id']}. Убедись, что бот добавлен в канал.")
+
+        drafts[message.from_user.id]["channels"].append(entry)
+        bot.send_message(message.chat.id, f"✅ Добавлен {entry['chat_id']}. Пришли следующий или /done")
+
+    @bot.message_handler(func=guard("invite_count"))
+    def step_invite_count(message):
+        try:
+            n = int(message.text.strip())
+            assert 1 <= n <= 50
+        except Exception:
+            bot.send_message(message.chat.id, texts.ADMIN_INVITE_BAD)
+            return
+        drafts[message.from_user.id]["invite_count"] = n
+        drafts[message.from_user.id]["step"] = "conditions"
+        bot.send_message(message.chat.id, f"✅ Нужно пригласить: {n} новых друга.")
+        send_conditions_menu(message.chat.id, message.from_user.id)
+
+    @bot.message_handler(func=guard("end_at"))
+    def step_end_at(message):
+        try:
+            dt = datetime.strptime(message.text.strip(), "%Y-%m-%d %H:%M")
+        except ValueError:
+            bot.send_message(message.chat.id, texts.ADMIN_END_AT_BAD)
+            return
+        if dt <= datetime.now():
+            bot.send_message(message.chat.id, texts.ADMIN_END_AT_PAST)
+            return
+        drafts[message.from_user.id]["end_at"] = dt.isoformat()
+        drafts[message.from_user.id]["step"] = "preview"
+        send_preview(message.chat.id, message.from_user.id)
+
+    def build_preview_text(d, gid=None):
+        lines = [f"🎁 <b>Розыгрыш{'' if gid is None else ' #' + str(gid)}: {d['prize_text']}</b>\n"]
+        cond = []
+        if d["channels"]:
+            cond.append("• Подписка: " + ", ".join(
+                ch["chat_id"] if ch["chat_id"].startswith("@") else "Приватный канал"
+                for ch in d["channels"]
+            ))
+        if d["invite_count"]:
+            cond.append(f"• Пригласить друзей: {d['invite_count']}")
+        if not cond:
+            cond.append("• Нет условий")
+        lines.append("<b>Условия участия:</b>\n" + "\n".join(cond) + "\n")
+        lines.append(f"👥 Победителей: {d['winners_count']}")
+        lines.append(f"⏰ Итоги: {texts.format_date(d['end_at'])}")
+        return "\n".join(lines)
+
+    def send_preview(chat_id, admin_id):
+        d = drafts[admin_id]
+        text = build_preview_text(d)
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        markup.add(types.InlineKeyboardButton("🎉 Участвовать", callback_data="preview:join"))
+        if d["prize_photo"]:
+            bot.send_photo(chat_id, d["prize_photo"], caption=text, parse_mode="HTML", reply_markup=markup)
+        else:
+            bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=markup)
+
+        pm = types.InlineKeyboardMarkup(row_width=1)
+        pm.add(
+            types.InlineKeyboardButton("✅ Опубликовать", callback_data="preview:publish"),
+            types.InlineKeyboardButton("✏️ Изменить", callback_data="preview:edit"),
+            types.InlineKeyboardButton("❌ Отмена", callback_data="preview:cancel"),
+        )
+        bot.send_message(chat_id, texts.ADMIN_PREVIEW, reply_markup=pm)
+
+    @bot.callback_query_handler(func=lambda c: c.data == "preview:join")
+    def preview_join(call):
+        bot.answer_callback_query(call.id, "Это предпросмотр. Кнопка заработает после публикации.", show_alert=True)
+
+    @bot.callback_query_handler(func=lambda c: c.data == "preview:cancel")
+    def preview_cancel(call):
+        drafts.pop(call.from_user.id, None)
+        bot.answer_callback_query(call.id, "Отменено")
+        bot.edit_message_text("❌ Создание розыгрыша отменено.",
+                              chat_id=call.message.chat.id,
+                              message_id=call.message.message_id)
+
+    @bot.callback_query_handler(func=lambda c: c.data == "preview:edit")
+    def preview_edit(call):
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        markup.add(
+            types.InlineKeyboardButton("📝 Приз", callback_data="edit:prize"),
+            types.InlineKeyboardButton("📷 Фото", callback_data="edit:photo"),
+            types.InlineKeyboardButton("👥 Победителей", callback_data="edit:winners"),
+            types.InlineKeyboardButton("📋 Условия", callback_data="edit:conditions"),
+            types.InlineKeyboardButton("⏰ Дату", callback_data="edit:end_at"),
+            types.InlineKeyboardButton("⬅️ Назад к предпросмотру", callback_data="edit:back"),
+        )
+        bot.answer_callback_query(call.id)
+        bot.send_message(call.message.chat.id, "Что изменить?", reply_markup=markup)
+
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("edit:"))
+    def edit_handler(call):
+        if not is_admin(call.from_user.id):
+            return
+        d = drafts.get(call.from_user.id)
+        if not d:
+            bot.answer_callback_query(call.id, texts.ADMIN_SESSION_EXPIRED, show_alert=True)
+            return
+        action = call.data.split(":")[1]
+        bot.answer_callback_query(call.id)
+        if action == "back":
+            send_preview(call.message.chat.id, call.from_user.id)
+            return
+        d["step"] = {"prize": "prize", "photo": "photo", "winners": "winners",
+                     "conditions": "conditions", "end_at": "end_at"}[action]
+        if action == "prize":
+            bot.send_message(call.message.chat.id, texts.ADMIN_STEP_PRIZE, parse_mode="HTML")
+        elif action == "photo":
+            bot.send_message(call.message.chat.id, texts.ADMIN_STEP_PHOTO, parse_mode="HTML")
+        elif action == "winners":
+            bot.send_message(call.message.chat.id, "👥 Сколько победителей? (1–100)")
+        elif action == "conditions":
+            send_conditions_menu(call.message.chat.id, call.from_user.id)
+        elif action == "end_at":
+            bot.send_message(call.message.chat.id, texts.ADMIN_END_AT, parse_mode="HTML")
+
+    @bot.callback_query_handler(func=lambda c: c.data == "preview:publish")
+    def preview_publish(call):
+        if not is_admin(call.from_user.id):
+            return
+        d = drafts.get(call.from_user.id)
+        if not d:
+            bot.answer_callback_query(call.id, texts.ADMIN_SESSION_EXPIRED, show_alert=True)
+            return
+
+        text = build_preview_text(d)
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        markup.add(types.InlineKeyboardButton("🎉 Участвовать", callback_data="join:pending"))
+
+        if d["prize_photo"]:
+            msg = bot.send_photo(CHANNEL_ID, d["prize_photo"], caption=text,
+                                 parse_mode="HTML", reply_markup=markup)
+        else:
+            msg = bot.send_message(CHANNEL_ID, text, parse_mode="HTML", reply_markup=markup)
+
+        cur.execute(
+            "INSERT INTO giveaways (status, prize_text, prize_photo, winners_count, required_channels, invite_count, no_conditions, end_at, channel_id, message_id) "
+            "VALUES ('active',?,?,?,?,?,?,?,?,?)",
+            (
+                d["prize_text"], d["prize_photo"], d["winners_count"],
+                json.dumps(d["channels"]), d["invite_count"],
+                1 if d["no_conditions"] else 0,
+                d["end_at"], str(CHANNEL_ID), msg.message_id
+            )
+        )
+        conn.commit()
+        gid = cur.lastrowid
+
+        new_markup = types.InlineKeyboardMarkup(row_width=1)
+        new_markup.add(types.InlineKeyboardButton("🎉 Участвовать", callback_data=f"join:{gid}"))
+        try:
+            bot.edit_message_reply_markup(CHANNEL_ID, msg.message_id, reply_markup=new_markup)
+        except Exception:
+            pass
+
+        drafts.pop(call.from_user.id, None)
+        bot.answer_callback_query(call.id, "✅ Опубликовано")
+        bot.send_message(call.message.chat.id, texts.ADMIN_PUBLISHED.format(gid=gid))
+
+    @bot.callback_query_handler(func=lambda c: c.data == "adm:list")
+    def adm_list(call):
+        if not is_admin(call.from_user.id):
+            return
+        cur.execute("SELECT id, prize_text, status FROM giveaways WHERE status!='deleted' ORDER BY id DESC LIMIT 20")
+        rows = cur.fetchall()
+        if not rows:
+            bot.answer_callback_query(call.id)
+            bot.send_message(call.message.chat.id, "Розыгрышей пока нет.")
+            return
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        for gid, prize, status in rows:
+            emoji = {"active": "🟢", "finished": "⚪", "draft": "🟡"}.get(status, "⚪")
+            markup.add(types.InlineKeyboardButton(f"{emoji} #{gid} — {prize[:40]}", callback_data=f"admgw:{gid}"))
+        bot.answer_callback_query(call.id)
+        bot.send_message(call.message.chat.id, "📊 Твои розыгрыши:", reply_markup=markup)
+
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("admgw:"))
+    def adm_gw(call):
+        if not is_admin(call.from_user.id):
+            return
+        gid = int(call.data.split(":")[1])
+        gw = get_giveaway(gid)
+        if not gw:
+            bot.answer_callback_query(call.id, "Не найдено", show_alert=True)
+            return
+        cur.execute("SELECT COUNT(*) FROM participants WHERE giveaway_id=?", (gid,))
+        participants = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM referrals WHERE giveaway_id=? AND status='confirmed' AND is_new_user=1", (gid,))
+        refs = cur.fetchone()[0]
+        text = (
+            f"🎁 <b>Розыгрыш #{gid} — {gw['prize_text']}</b>\n\n"
+            f"👥 Участников: {participants}\n"
+            f"🏆 Победителей: {gw['winners_count']}\n"
+            f"👫 Приглашений: {refs}\n"
+            f"⏰ Итоги: {texts.format_date(gw['end_at'])}\n"
+            f"Статус: {gw['status']}"
+        )
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        markup.add(
+            types.InlineKeyboardButton("📊 Статистика", callback_data=f"admstats:{gid}"),
+            types.InlineKeyboardButton("🛑 Завершить досрочно", callback_data=f"admfinish:{gid}"),
+            types.InlineKeyboardButton("🔔 Напомнить", callback_data=f"admremind:{gid}"),
+            types.InlineKeyboardButton("🗑 Удалить", callback_data=f"admdel:{gid}"),
+            types.InlineKeyboardButton("⬅️ Назад", callback_data="adm:list"),
+        )
+        bot.answer_callback_query(call.id)
+        bot.send_message(call.message.chat.id, text, parse_mode="HTML", reply_markup=markup)
+
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("admstats:"))
+    def adm_stats(call):
+        if not is_admin(call.from_user.id):
+            return
+        gid = int(call.data.split(":")[1])
+        cur.execute("SELECT COUNT(*) FROM participants WHERE giveaway_id=?", (gid,))
+        participants = cur.fetchone()[0]
+        cur.execute("""
+            SELECT inviter_id, COUNT(*) FROM referrals
+            WHERE giveaway_id=? AND status='confirmed' AND is_new_user=1
+            GROUP BY inviter_id ORDER BY COUNT(*) DESC LIMIT 5
+        """, (gid,))
+        top = cur.fetchall()
+        lines = [f"📊 <b>Статистика розыгрыша #{gid}</b>\n",
+                 f"👥 Участников: {participants}"]
+        if top:
+            lines.append("\n<b>Топ пригласивших:</b>")
+            for i, (uid, cnt) in enumerate(top, 1):
+                lines.append(f"{i}. <a href='tg://user?id={uid}'>{uid}</a> — {cnt}")
+        bot.answer_callback_query(call.id)
+        bot.send_message(call.message.chat.id, "\n".join(lines), parse_mode="HTML")
+
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("admfinish:"))
+    def adm_finish(call):
+        if not is_admin(call.from_user.id):
+            return
+        gid = int(call.data.split(":")[1])
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        markup.add(
+            types.InlineKeyboardButton("✅ Да, завершить", callback_data=f"admfinish_yes:{gid}"),
+            types.InlineKeyboardButton("❌ Отмена", callback_data=f"admgw:{gid}"),
+        )
+        bot.answer_callback_query(call.id)
+        bot.send_message(call.message.chat.id, f"⚠️ Завершить розыгрыш #{gid} досрочно?", reply_markup=markup)
+
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("admfinish_yes:"))
+    def adm_finish_yes(call):
+        if not is_admin(call.from_user.id):
+            return
+        gid = int(call.data.split(":")[1])
+        from scheduler import finish_giveaway
+        finish_giveaway(bot, gid)
+        bot.answer_callback_query(call.id, "✅ Завершено")
+        bot.send_message(call.message.chat.id, f"✅ Розыгрыш #{gid} завершён, итоги опубликованы.")
+
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("admremind:"))
+    def adm_remind(call):
+        if not is_admin(call.from_user.id):
+            return
+        gid = int(call.data.split(":")[1])
+        gw = get_giveaway(gid)
+        if not gw or gw["status"] != "active":
+            bot.answer_callback_query(call.id, "Розыгрыш не активен", show_alert=True)
+            return
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        markup.add(types.InlineKeyboardButton("🎉 Участвовать", callback_data=f"join:{gid}"))
+        try:
+            bot.send_message(
+                gw["channel_id"],
+                f"🔔 <b>Напоминание!</b>\n\n"
+                f"До итогов розыгрыша «{gw['prize_text']}» осталось совсем немного.\n"
+                f"Успей принять участие!",
+                parse_mode="HTML",
+                reply_markup=markup,
+                reply_to_message_id=gw["message_id"]
+            )
+            bot.answer_callback_query(call.id, "✅ Напоминание отправлено")
+        except Exception as e:
+            bot.answer_callback_query(call.id, f"Ошибка: {e}", show_alert=True)
+
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("admdel:"))
+    def adm_del(call):
+        if not is_admin(call.from_user.id):
+            return
+        gid = int(call.data.split(":")[1])
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        markup.add(
+            types.InlineKeyboardButton("✅ Да, удалить", callback_data=f"admdel_yes:{gid}"),
+            types.InlineKeyboardButton("❌ Отмена", callback_data=f"admgw:{gid}"),
+        )
+        bot.answer_callback_query(call.id)
+        bot.send_message(call.message.chat.id, f"⚠️ Удалить розыгрыш #{gid}?", reply_markup=markup)
+
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("admdel_yes:"))
+    def adm_del_yes(call):
+        if not is_admin(call.from_user.id):
+            return
+        gid = int(call.data.split(":")[1])
+        gw = get_giveaway(gid)
+        if gw:
+            try:
+                bot.delete_message(gw["channel_id"], gw["message_id"])
+            except Exception:
+                pass
+            cur.execute("UPDATE giveaways SET status='deleted' WHERE id=?", (gid,))
+            conn.commit()
+        bot.answer_callback_query(call.id, "✅ Удалено")
+        bot.send_message(call.message.chat.id, f"🗑 Розыгрыш #{gid} удалён.")
+scheduler.py
+python
+import threading
+import time
+import random
+from datetime import datetime
+from database import cur, conn, get_giveaway
+import texts
+
+def finish_giveaway(bot, gid):
+    gw = get_giveaway(gid)
+    if not gw or gw["status"] != "active":
+        return
+
+    cur.execute("SELECT user_id FROM participants WHERE giveaway_id=?", (gid,))
+    users = [r[0] for r in cur.fetchall()]
+    need = gw["winners_count"]
+
+    if not users:
+        bot.send_message(
+            gw["channel_id"],
+            f"😔 Розыгрыш #{gid} — {gw['prize_text']} завершён.\n\n"
+            f"К сожалению, участников не было. Приз остаётся у организатора.",
+            reply_to_message_id=gw["message_id"]
+        )
+    else:
+        winners = users if len(users) <= need else random.sample(users, need)
+        mentions = []
+        for uid in winners:
+            cur.execute("SELECT username FROM users WHERE user_id=?", (uid,))
+            row = cur.fetchone()
+            uname = row[0] if row else None
+            mentions.append(texts.mention(uid, uname))
+
+        header = f"🎉 <b>Итоги розыгрыша #{gid} — {gw['prize_text']}</b>\n\n"
+        if len(users) < need:
+            header += f"🏆 Победители (участников было меньше, чем призов):\n"
+        else:
+            header += f"🏆 Победители:\n"
+        text = header + "\n".join(f"• {m}" for m in mentions) + "\n\nПоздравляем! 🎊"
+        bot.send_message(
+            gw["channel_id"], text, parse_mode="HTML",
+            reply_to_message_id=gw["message_id"]
+        )
+
+    cur.execute("UPDATE giveaways SET status='finished' WHERE id=?", (gid,))
+    conn.commit()
+
+def scheduler_loop(bot):
+    while True:
+        try:
+            now = datetime.now().isoformat()
+            cur.execute(
+                "SELECT id FROM giveaways WHERE status='active' AND end_at <= ?", (now,)
+            )
+            for (gid,) in cur.fetchall():
+                finish_giveaway(bot, gid)
+        except Exception as e:
+            print("scheduler error:", e)
+        time.sleep(60)
+
+def start_scheduler(bot):
+    t = threading.Thread(target=scheduler_loop, args=(bot,), daemon=True)
+    t.start()
+main.py
+python
+import telebot
+from config import BOT_TOKEN
+from database import init_db
+import user
+import admin
+from scheduler import start_scheduler
+
+bot = telebot.TeleBot(BOT_TOKEN)
+
+def main():
+    init_db()
+    user.register(bot)
+    admin.register(bot)
+    start_scheduler(bot)
+    print("Бот запущен...")
+    bot.infinity_polling()
+
+if __name__ == "__main__":
+    main()
+Как запустить
+bash
+pip install pytelegrambotapi
+python main.py
+Чек-лист перед стартом:
+
+В config.py — токен, два ADMINS (числовые id), CHANNEL_ID.
+
+Бот добавлен админом в канал публикации и во все каналы, на которые проверяется подписка.
+
+Если канал приватный — при создании розыгрыша вводи -100... | https://t.me/+... (постоянная ссылка, не одноразовая).
+
+Если нужен requirements.txt или Dockerfile — скажи, добавлю.
+
+какое название для бота можно сделать, Biograv ...
+Вот варианты в стиле Biograv — короткие, звучные, с намёком на розыгрыши/подарки:
+
+Прямо в стиле Biograv (выдуманное слово + смысл):
+
+Givegrav — giveaway + grav, читается легко
+
+PrizeGrav — приз + grav
+
+Lotograv — лото + grav
+
+WinGrav — win + grav
+
+GiftGrav — подарок + grav
+
+Rafflegrav — raffle + grav
+
+Drav — короткое, от «draw» (жеребьёвка)
+
+С русским подтекстом:
+
+RozygryshBot — прямо и понятно
+
+PrzBot — сокращение от «приз»
+
+LottoGrav
+
+Vygrysh — от «выигрыш»
+
+Атмосферные / брендовые:
+
+GiftOrbit — орбита подарков
+
+PrizeNova — новая звезда призов
+
+LuckyGrav
+
+GravGive
+
+WinWave — волна выигрышей
+
+GiftHive — улей подарков
+
+Если хочется совсем коротко (до 5 букв):
+
+Gravv
+
+Givr
+
+Wing
+
+Dravv
+
+Мой топ-3 под твой проект: Givegrav, WinGrav, LuckyGrav — они и в стиле Biograv, и сразу намекают на розыгрыши.
+
+Хочешь — подберу под конкретную тематику (NFT / звёзды / подарки) или проверю, свободен ли юзернейм в Telegram.
+
+Понял, канал для логов приватный (с ID -1003761891719). Вставляю в конфиг.
+
+Обнови свой config.py:
+
+python
+BOT_TOKEN = "9244708688:AAGCly9x3B4FAugXTc69Z-t_AthlAdWcl9Q"
+ADMINS = [728960655, 1175273188]  # два админа
+CHANNEL_ID = "@biograV_tw"        # канал для публикации
+DB_PATH = "bot.db"
+
+# Для приватного канала используем числовой ID
+LOG_CHANNEL_ID = -1003761891719   # канал для логов
+Важный нюанс: так как канал приватный, бот должен быть в нём администратором с правом отправки сообщений. Иначе он не сможет туда писать.
+
+Теперь тебе нужно создать файл logger.py (если ты его еще не создал) в той же папке, где main.py:
+
+python
+import requests
+from config import BOT_TOKEN, LOG_CHANNEL_ID
+
+def send_log(emoji, text):
+    """Отправляет лог в канал, если он указан."""
+    # Проверка, что ID канала задан
+    if not LOG_CHANNEL_ID:
+        return 
+        
+    try:
+        requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
+            "chat_id": LOG_CHANNEL_ID,
+            "text": f"{emoji} {text}",
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True
+        })
+    except Exception as e:
+        # Чтобы не спамить в консоль, можно закомментировать print
+        # print(f"Ошибка логирования: {e}")
+        pass
+
+# Обертки для удобства
+def log_user(text): send_log("👤", text)
+def log_balance(text): send_log("💰", text)
+def log_case(text): send_log("🎁", text)
+def log_inventory(text): send_log("📦", text)
+def log_admin(text): send_log("👑", text)
+def log_giveaway(text): send_log("🎲", text)
+def log_error(text): send_log("❌", text)
+Теперь осталось только добавить вызовы logger.log_... в код. Начнем с админки, чтобы ты сразу увидел, как это работает.
+
+Вот полный admin.py с уже встроенными логами (в консоли print остались, как ты просил):
+
+python
+import json
+import re
+import time
+from datetime import datetime
+import requests
+from telebot import types
+from config import ADMINS, CHANNEL_ID
+from database import cur, conn, get_giveaway
+import texts
+import logger  # <--- Импортируем логгер
+
+drafts = {}
+admin_states = {} 
+
+GIFTS = {
+    "heart": {"emoji": "❤️", "name": "Сердце", "price": 15, "id": 5170145012310081615},
+    "bear": {"emoji": "🧸", "name": "Мишка", "price": 15, "id": 5170233102089322756},
+    "gift": {"emoji": "🎁", "name": "Подарок", "price": 25, "id": 5170250947678437525},
+    "rose": {"emoji": "🌹", "name": "Роза", "price": 25, "id": 5168103777563050263},
+    "cake": {"emoji": "🎂", "name": "Торт", "price": 50, "id": 5170144170496491616},
+    "bouquet": {"emoji": "💐", "name": "Букет", "price": 50, "id": 5170314324215857265},
+    "rocket": {"emoji": "🚀", "name": "Ракета", "price": 50, "id": 5170564780938756245},
+    "champagne": {"emoji": "🍾", "name": "Шампанское", "price": 50, "id": 60286016306662853006},
+    "cup": {"emoji": "🏆", "name": "Кубок", "price": 100, "id": 5168043875654172773},
+    "ring": {"emoji": "💍", "name": "Кольцо", "price": 100, "id": 5170690322832818290},
+    "diamond": {"emoji": "💎", "name": "Алмаз", "price": 100, "id": 5170521118301225164},
+}
+
+def register(bot):
+    def is_admin(uid): 
+        return uid in ADMINS
+
+    @bot.message_handler(commands=["admin"])
+    def admin_cmd(message):
+        if not is_admin(message.from_user.id): return
+        
+        markup = types.InlineKeyboardMarkup(row_width=2)
+        markup.add(
+            types.InlineKeyboardButton("🎁 Создать розыгрыш", callback_data="adm:create"),
+            types.InlineKeyboardButton("📊 Мои розыгрыши", callback_data="adm:list"),
+        )
+        markup.add(
+            types.InlineKeyboardButton("⭐ Выдать спины", callback_data="adm:give_spins"),
+            types.InlineKeyboardButton("🎁 Выдать подарок", callback_data="adm:give_gift"),
+        )
+        markup.add(
+            types.InlineKeyboardButton("🎟 Создать промокод", callback_data="adm:create_promo"),
+            types.InlineKeyboardButton("📈 Статистика", callback_data="adm:stats"),
+        )
+        markup.add(
+            types.InlineKeyboardButton("📢 Рассылка", callback_data="adm:broadcast"),
+        )
+        bot.send_message(message.chat.id, texts.ADMIN_PANEL, parse_mode="HTML", reply_markup=markup)
+
+    # --- ВЫДАТЬ СПИНЫ ---
+    @bot.callback_query_handler(func=lambda c: c.data == "adm:give_spins")
+    def adm_give_spins(call):
+        if not is_admin(call.from_user.id): return
+        admin_states[call.from_user.id] = "give_spins_input"
+        bot.answer_callback_query(call.id)
+        msg = bot.send_message(call.message.chat.id, "⭐ Введи ID пользователя и количество спинов через пробел.\n\nПример: `728960655 5`", parse_mode="Markdown")
+        bot.register_next_step_handler(msg, process_give_spins)
+
+    def process_give_spins(message):
+        if message.from_user.id not in admin_states: return
+        admin_states.pop(message.from_user.id, None)
+        try:
+            user_id_str, count_str = message.text.strip().split()
+            user_id = int(user_id_str)
+            count = int(count_str)
+            success = 0
+            for _ in range(count):
+                try:
+                    res = requests.post("http://localhost:8080/api/add-spin", json={"user_id": str(user_id)})
+                    if res.status_code == 200: success += 1
+                except: pass
+            if success > 0:
+                bot.reply_to(message, f"✅ Успешно начислено {success} спинов пользователю `{user_id}`.", parse_mode="Markdown")
+                try: bot.send_message(user_id, f"🎁 Администратор выдал вам {success} спинов!")
+                except: pass
+                # ЛОГ
+                logger.log_admin(f"Админ @{message.from_user.username or message.from_user.id} выдал {success} спинов пользователю @{user_id}.")
+            else:
+                bot.reply_to(message, "⚠️ Не удалось начислить спины. Сервер недоступен.")
+        except ValueError:
+            bot.reply_to(message, "❌ Неверный формат. Нужно два числа через пробел.")
+
+    # --- ВЫДАТЬ ПОДАРОК ---
+    @bot.callback_query_handler(func=lambda c: c.data == "adm:give_gift")
+    def adm_give_gift(call):
+        if not is_admin(call.from_user.id): return
+        admin_states[call.from_user.id] = "give_gift_input"
+        bot.answer_callback_query(call.id)
+        msg = bot.send_message(call.message.chat.id, "🎁 Введи ID пользователя и ID подарка через пробел.\n\nПример: `728960655 5170233102089322756`", parse_mode="Markdown")
+        bot.register_next_step_handler(msg, process_give_gift)
+
+    def process_give_gift(message):
+        if message.from_user.id not in admin_states: return
+        admin_states.pop(message.from_user.id, None)
+        try:
+            user_id_str, gift_id_str = message.text.strip().split()
+            user_id = int(user_id_str)
+            gift_id = gift_id_str
+            cur.execute("INSERT INTO winners (giveaway_id, user_id, gift_id, status) VALUES (?, ?, ?, 'pending')", (0, user_id, gift_id))
+            conn.commit()
+            bot.reply_to(message, f"✅ Подарок `{gift_id}` записан для пользователя `{user_id}`. Юзербот выдаст его, когда человек напишет @Biograv.", parse_mode="Markdown")
+            try: bot.send_message(user_id, f"🎁 Администратор выдал вам подарок! Напишите @Biograv, чтобы получить его.")
+            except: pass
+            # ЛОГ
+            logger.log_admin(f"Админ @{message.from_user.username or message.from_user.id} выдал подарок {gift_id} пользователю @{user_id}.")
+        except ValueError:
+            bot.reply_to(message, "❌ Неверный формат. Нужно два значения через пробел.")
+
+    # --- СОЗДАТЬ ПРОМОКОД ---
+    @bot.callback_query_handler(func=lambda c: c.data == "adm:create_promo")
+    def adm_create_promo(call):
+        if not is_admin(call.from_user.id): return
+        admin_states[call.from_user.id] = "promo_code"
+        bot.answer_callback_query(call.id)
+        bot.send_message(call.message.chat.id, "🎟 Введи название промокода (например, `BIOGRAV`):", parse_mode="Markdown")
+
+    @bot.message_handler(func=lambda m: m.from_user.id in admin_states and admin_states[m.from_user.id] == "promo_code")
+    def process_promo_code(message):
+        admin_states[message.from_user.id] = {"step": "promo_type", "code": message.text.strip().upper()}
+        markup = types.InlineKeyboardMarkup(row_width=2)
+        markup.add(
+            types.InlineKeyboardButton("⭐ Спины", callback_data="promo_type:spin"),
+            types.InlineKeyboardButton("💎 Звёзды", callback_data="promo_type:stars")
+        )
+        bot.send_message(message.chat.id, "Что должно выдаваться по этому промокоду?", reply_markup=markup)
+
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("promo_type:"))
+    def process_promo_type(call):
+        ptype = call.data.split(":")[1]
+        d = admin_states.get(call.from_user.id)
+        if not isinstance(d, dict): return
+        d["type"] = ptype
+        d["step"] = "promo_value"
+        bot.answer_callback_query(call.id)
+        if ptype == "spin":
+            bot.send_message(call.message.chat.id, "Сколько спинов выдавать? (число)")
+        else:
+            bot.send_message(call.message.chat.id, "Сколько звёзд выдавать? (число)")
+
+    @bot.message_handler(func=lambda m: m.from_user.id in admin_states and isinstance(admin_states[m.from_user.id], dict) and admin_states[m.from_user.id].get("step") == "promo_value")
+    def process_promo_value(message):
+        d = admin_states.get(message.from_user.id)
+        d["value"] = message.text.strip()
+        d["step"] = "promo_limit"
+        bot.send_message(message.chat.id, "Сколько раз можно использовать этот промокод? (введи число, например, 50)")
+
+    @bot.message_handler(func=lambda m: m.from_user.id in admin_states and isinstance(admin_states[m.from_user.id], dict) and admin_states[m.from_user.id].get("step") == "promo_limit")
+    def process_promo_limit(message):
+        d = admin_states.pop(message.from_user.id)
+        try:
+            limit = int(message.text.strip())
+            cur.execute("INSERT INTO promocodes (code, reward_type, reward_value, max_uses) VALUES (?, ?, ?, ?)",
+                (d["code"], d["type"], d["value"], limit))
+            conn.commit()
+            bot.send_message(message.chat.id, f"✅ Промокод `{d['code']}` создан на {limit} активаций!", parse_mode="Markdown")
+            # ЛОГ
+            logger.log_admin(f"Админ @{message.from_user.username or message.from_user.id} создал промокод {d['code']}.")
+        except Exception as e:
+            bot.send_message(message.chat.id, f"❌ Ошибка: {e}")
+
+    # --- СТАТИСТИКА ---
+    @bot.callback_query_handler(func=lambda c: c.data == "adm:stats")
+    def adm_stats(call):
+        if not is_admin(call.from_user.id): return
+        cur.execute("SELECT COUNT(*) FROM users")
+        users = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM giveaways WHERE status='active'")
+        active_gws = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM winners")
+        total_wins = cur.fetchone()[0]
+        text = (
+            f"📈 <b>Статистика бота</b>\n\n"
+            f"👥 Пользователей: {users}\n"
+            f"🎁 Активных розыгрышей: {active_gws}\n"
+            f"🏆 Всего выигрышей: {total_wins}"
+        )
+        bot.send_message(call.message.chat.id, text, parse_mode="HTML")
+
+    # --- РАССЫЛКА ---
+    @bot.callback_query_handler(func=lambda c: c.data == "adm:broadcast")
+    def adm_broadcast(call):
+        if not is_admin(call.from_user.id): return
+        admin_states[call.from_user.id] = "broadcast"
+        bot.answer_callback_query(call.id)
+        msg = bot.send_message(call.message.chat.id, "📢 Введи текст рассылки (можно с картинкой):")
+        bot.register_next_step_handler(msg, process_broadcast)
+
+    def process_broadcast(message):
+        admin_states.pop(message.from_user.id, None)
+        cur.execute("SELECT user_id FROM users")
+        users = cur.fetchall()
+        success = 0
+        for (uid,) in users:
+            try:
+                bot.copy_message(uid, message.chat.id, message.message_id)
+                success += 1
+                time.sleep(0.05)
+            except: pass
+        bot.reply_to(message, f"✅ Рассылка завершена. Доставлено: {success} из {len(users)}.")
+        # ЛОГ
+        logger.log_admin(f"Админ @{message.from_user.username or message.from_user.id} сделал рассылку (доставлено {success} из {len(users)}).")
+
+    # --- СОЗДАНИЕ РОЗЫГРЫША (FSM) ---
+    @bot.callback_query_handler(func=lambda c: c.data == "adm:create")
+    def adm_create(call):
+        if not is_admin(call.from_user.id): return
+        drafts[call.from_user.id] = {"step": "post_text", "channels": []}
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("❌ Отменить", callback_data="adm:cancel"))
+        msg = bot.send_message(call.message.chat.id, "📝 <b>Шаг 1 из 6 — Пост</b>\n\nПришли мне текст розыгрыша или перешли готовый пост.", parse_mode="HTML", reply_markup=markup)
+        drafts[call.from_user.id]["last_msg_id"] = msg.message_id
+
+    def guard(step):
+        def f(message):
+            d = drafts.get(message.from_user.id)
+            return d and d.get("step") == step
+        return f
+
+    @bot.message_handler(func=guard("post_text"), content_types=["text", "photo", "video", "animation"])
+    def step_post_text(message):
+        html_text = message.html_text
+        d = drafts[message.from_user.id]
+        d["post_text"] = html_text
+        if message.content_type == "photo": d["prize_photo"] = message.photo[-1].file_id
+        elif message.content_type == "video": d["prize_photo"] = ("video", message.video.file_id)
+        elif message.content_type == "animation": d["prize_photo"] = ("animation", message.animation.file_id)
+        else: d["prize_photo"] = None
+        d["step"] = "winners"
+        bot.send_message(message.chat.id, texts.ADMIN_STEP_WINNERS, parse_mode="HTML")
+
+    @bot.message_handler(func=guard("winners"))
+    def step_winners(message):
+        try:
+            n = int(message.text.strip())
+            assert 1 <= n <= 100
+        except Exception:
+            bot.send_message(message.chat.id, texts.ADMIN_WINNERS_BAD)
+            return
+        drafts[message.from_user.id]["winners_count"] = n
+        drafts[message.from_user.id]["step"] = "conditions"
+        send_conditions_menu(message.chat.id, message.from_user.id)
+
+    def send_conditions_menu(chat_id, admin_id):
+        d = drafts[admin_id]
+        sub_mark = "✅" if d["channels"] else "⬜"
+        inv_mark = "✅" if d["invite_count"] else "⬜"
+        none_mark = "✅" if d["no_conditions"] else "⬜"
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        markup.add(
+            types.InlineKeyboardButton(f"{sub_mark} Подписка на канал", callback_data="cond:sub"),
+            types.InlineKeyboardButton(f"{inv_mark} Пригласить друзей", callback_data="cond:inv"),
+            types.InlineKeyboardButton(f"{none_mark} Нет условий", callback_data="cond:none"),
+            types.InlineKeyboardButton("➡️ Далее", callback_data="cond:next"),
+            types.InlineKeyboardButton("❌ Отменить", callback_data="adm:cancel"),
+        )
+        bot.send_message(chat_id, texts.ADMIN_CONDITIONS, parse_mode="HTML", reply_markup=markup)
+
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("cond:"))
+    def cond_handler(call):
+        if not is_admin(call.from_user.id): return
+        d = drafts.get(call.from_user.id)
+        if not d or d["step"] != "conditions": return
+        action = call.data.split(":")[1]
+        if action == "sub":
+            d["step"] = "channels_input"
+            bot.answer_callback_query(call.id)
+            bot.send_message(call.message.chat.id, texts.ADMIN_CHANNELS_INPUT)
+        elif action == "inv":
+            d["step"] = "invite_count"
+            bot.answer_callback_query(call.id)
+            bot.send_message(call.message.chat.id, texts.ADMIN_INVITE_COUNT)
+        elif action == "none":
+            d["no_conditions"] = True
+            d["channels"] = []
+            d["invite_count"] = 0
+            bot.answer_callback_query(call.id, "Условия сброшены")
+            send_conditions_menu(call.message.chat.id, call.from_user.id)
+        elif action == "next":
+            if not d["no_conditions"] and not d["channels"] and not d["invite_count"]:
+                bot.answer_callback_query(call.id, texts.ADMIN_NEED_CONDITION, show_alert=True)
+                return
+            d["step"] = "end_at"
+            bot.answer_callback_query(call.id)
+            bot.send_message(call.message.chat.id, texts.ADMIN_END_AT, parse_mode="HTML")
+
+    @bot.message_handler(func=guard("channels_input"))
+    def step_channels(message):
+        if message.text == "/done":
+            d = drafts[message.from_user.id]
+            if not d["channels"]:
+                bot.send_message(message.chat.id, "Ты не добавил ни одного канала.")
+                return
+            d["step"] = "conditions"
+            bot.send_message(message.chat.id, "✅ Каналы добавлены.")
+            send_conditions_menu(message.chat.id, message.from_user.id)
+            return
+        line = message.text.strip()
+        if "|" in line:
+            chat_id, link = [x.strip() for x in line.split("|", 1)]
+            entry = {"chat_id": chat_id, "invite_link": link}
+        else:
+            if not line.startswith("@"):
+                bot.send_message(message.chat.id, "Публичный канал должен начинаться с @")
+                return
+            entry = {"chat_id": line, "invite_link": f"https://t.me/{line[1:]}"}
+        drafts[message.from_user.id]["channels"].append(entry)
+        bot.send_message(message.chat.id, f"✅ Добавлен {entry['chat_id']}. Пришли следующий или /done")
+
+    @bot.message_handler(func=guard("invite_count"))
+    def step_invite_count(message):
+        try:
+            n = int(message.text.strip())
+            assert 1 <= n <= 50
+        except Exception:
+            bot.send_message(message.chat.id, texts.ADMIN_INVITE_BAD)
+            return
+        drafts[message.from_user.id]["invite_count"] = n
+        drafts[message.from_user.id]["step"] = "conditions"
+        bot.send_message(message.chat.id, f"✅ Нужно пригласить: {n} новых друга.")
+        send_conditions_menu(message.chat.id, message.from_user.id)
+
+    @bot.message_handler(func=guard("end_at"))
+    def step_end_at(message):
+        try:
+            dt = datetime.strptime(message.text.strip(), "%Y-%m-%d %H:%M")
+        except ValueError:
+            bot.send_message(message.chat.id, texts.ADMIN_END_AT_BAD)
+            return
+        if dt <= datetime.now():
+            bot.send_message(message.chat.id, texts.ADMIN_END_AT_PAST)
+            return
+        drafts[message.from_user.id]["end_at"] = dt.strftime("%Y-%m-%d %H:%M")
+        drafts[message.from_user.id]["step"] = "preview"
+        send_preview(message.chat.id, message.from_user.id)
+
+    def send_preview(chat_id, admin_id):
+        d = drafts[admin_id]
+        text = d["post_text"]
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        markup.add(types.InlineKeyboardButton("🎉 Участвовать (0)", url="https://t.me/"))
+
+        if isinstance(d["prize_photo"], tuple) and d["prize_photo"][0] == "video":
+            bot.send_video(chat_id, d["prize_photo"][1], caption=text, parse_mode="HTML", reply_markup=markup)
+        elif isinstance(d["prize_photo"], tuple) and d["prize_photo"][0] == "animation":
+            bot.send_animation(chat_id, d["prize_photo"][1], caption=text, parse_mode="HTML", reply_markup=markup)
+        elif d["prize_photo"]:
+            bot.send_photo(chat_id, d["prize_photo"], caption=text, parse_mode="HTML", reply_markup=markup)
+        else:
+            bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=markup)
+
+        pm = types.InlineKeyboardMarkup(row_width=1)
+        pm.add(
+            types.InlineKeyboardButton("✅ Опубликовать", callback_data="preview:publish"),
+            types.InlineKeyboardButton("❌ Отмена", callback_data="adm:cancel"),
+        )
+        bot.send_message(chat_id, texts.ADMIN_PREVIEW, reply_markup=pm)
+
+    @bot.callback_query_handler(func=lambda c: c.data == "preview:publish")
+    def preview_publish(call):
+        if not is_admin(call.from_user.id): return
+        d = drafts.get(call.from_user.id)
+        if not d: return
+
+        bot_username = bot.get_me().username
+        text = d["post_text"]
+        
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        markup.add(types.InlineKeyboardButton("🎉 Участвовать (0)", url=f"https://t.me/{bot_username}?start=join_pending"))
+
+        if isinstance(d["prize_photo"], tuple) and d["prize_photo"][0] == "video":
+            msg = bot.send_video(CHANNEL_ID, d["prize_photo"][1], caption=text, parse_mode="HTML", reply_markup=markup)
+        elif isinstance(d["prize_photo"], tuple) and d["prize_photo"][0] == "animation":
+            msg = bot.send_animation(CHANNEL_ID, d["prize_photo"][1], caption=text, parse_mode="HTML", reply_markup=markup)
+        elif d["prize_photo"]:
+            msg = bot.send_photo(CHANNEL_ID, d["prize_photo"], caption=text, parse_mode="HTML", reply_markup=markup)
+        else:
+            msg = bot.send_message(CHANNEL_ID, text, parse_mode="HTML", reply_markup=markup)
+
+        cur.execute(
+            "INSERT INTO giveaways (status, prize_text, prize_photo, winners_count, required_channels, invite_count, no_conditions, end_at, channel_id, message_id) "
+            "VALUES ('active',?,?,?,?,?,?,?,?,?)",
+            (
+                text, str(d["prize_photo"]) if d["prize_photo"] else None, d["winners_count"],
+                json.dumps(d["channels"]), d["invite_count"],
+                1 if d["no_conditions"] else 0,
+                d["end_at"], str(CHANNEL_ID), msg.message_id
+            )
+        )
+        conn.commit()
+        gid = cur.lastrowid
+
+        new_markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🎉 Участвовать (0)", url=f"https://t.me/{bot_username}?start=join_{gid}"))
+        try:
+            bot.edit_message_reply_markup(CHANNEL_ID, msg.message_id, reply_markup=new_markup)
+        except: pass
+
+        drafts.pop(call.from_user.id, None)
+        bot.answer_callback_query(call.id, "✅ Опубликовано")
+        bot.send_message(call.message.chat.id, texts.ADMIN_PUBLISHED.format(gid=gid))
+        # ЛОГ
+        logger.log_admin(f"Админ @{call.from_user.username or call.from_user.id} создал розыгрыш #{gid}.")
+
+    @bot.callback_query_handler(func=lambda c: c.data == "adm:cancel" or c.data == "preview:cancel")
+    def cancel_handler(call):
+        drafts.pop(call.from_user.id, None)
+        bot.answer_callback_query(call.id, "Отменено")
+        bot.send_message(call.message.chat.id, "❌ Действие отменено.")
+
+    @bot.callback_query_handler(func=lambda c: c.data == "adm:list")
+    def adm_list(call):
+        if not is_admin(call.from_user.id): return
+        cur.execute("SELECT id, status, prize_text FROM giveaways WHERE status!='deleted' ORDER BY id DESC LIMIT 20")
+        rows = cur.fetchall()
+        if not rows:
+            bot.send_message(call.message.chat.id, "Розыгрышей пока нет.")
+            return
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        for gid, status, prize in rows:
+            emoji = {"active": "🟢", "finished": "⚪"}.get(status, "⚪")
+            clean_prize = re.sub('<[^>]+>', '', prize or "")[:30]
+            markup.add(types.InlineKeyboardButton(f"{emoji} #{gid} — {clean_prize}...", callback_data=f"admgw:{gid}"))
+        bot.send_message(call.message.chat.id, "📊 Твои розыгрыши:", reply_markup=markup)
+
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("admgw:"))
+    def adm_gw(call):
+        if not is_admin(call.from_user.id): return
+        gid = int(call.data.split(":")[1])
+        gw = get_giveaway(gid)
+        cur.execute("SELECT COUNT(*) FROM participants WHERE giveaway_id=?", (gid,))
+        participants = cur.fetchone()[0]
+        
+        text = (
+            f"🎁 <b>Розыгрыш #{gid}</b>\n\n"
+            f"👥 Участников: {participants}\n"
+            f"🏆 Победителей: {gw['winners_count']}\n"
+            f"⏰ Итоги: {texts.format_date(gw['end_at'])}\n"
+            f"Статус: {gw['status']}"
+        )
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        markup.add(
+            types.InlineKeyboardButton("🛑 Завершить досрочно", callback_data=f"admfinish:{gid}"),
+            types.InlineKeyboardButton("🗑 Удалить", callback_data=f"admdel:{gid}"),
+            types.InlineKeyboardButton("⬅️ Назад", callback_data="adm:list"),
+        )
+        bot.send_message(call.message.chat.id, text, parse_mode="HTML", reply_markup=markup)
+
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("admfinish:"))
+    def adm_finish(call):
+        gid = int(call.data.split(":")[1])
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        markup.add(
+            types.InlineKeyboardButton("✅ Да, завершить", callback_data=f"admfinish_yes:{gid}"),
+            types.InlineKeyboardButton("❌ Отмена", callback_data=f"admgw:{gid}"),
+        )
+        bot.send_message(call.message.chat.id, f"⚠️ Завершить розыгрыш #{gid} досрочно?", reply_markup=markup)
+
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("admfinish_yes:"))
+    def adm_finish_yes(call):
+        gid = int(call.data.split(":")[1])
+        from tasks import finish_giveaway
+        finish_giveaway(bot, gid, admin_chat_id=call.message.chat.id)
+        bot.answer_callback_query(call.id, "✅ Завершено")
+
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("admdel:"))
+    def adm_del(call):
+        gid = int(call.data.split(":")[1])
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        markup.add(
+            types.InlineKeyboardButton("✅ Да, удалить", callback_data=f"admdel_yes:{gid}"),
+            types.InlineKeyboardButton("❌ Отмена", callback_data=f"admgw:{gid}"),
+        )
+        bot.send_message(call.message.chat.id, f"⚠️ Удалить розыгрыш #{gid}?", reply_markup=markup)
+
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("admdel_yes:"))
+    def adm_del_yes(call):
+        gid = int(call.data.split(":")[1])
+        gw = get_giveaway(gid)
+        if gw:
+            try: bot.delete_message(gw["channel_id"], gw["message_id"])
+            except: pass
+            cur.execute("UPDATE giveaways SET status='deleted' WHERE id=?", (gid,))
+            conn.commit()
+        bot.send_message(call.message.chat.id, "🗑 Розыгрыш удалён.")
+
+    return None
+ты тут?
+Length limit reached. Please start a new chat.
+
